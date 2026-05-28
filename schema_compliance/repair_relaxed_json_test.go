@@ -28,6 +28,11 @@ const nestedObjectSchema = `{
   "additionalProperties": false
 }`
 
+const relaxedStringArraySchema = `{
+  "type": "array",
+  "items": {"type": "string"}
+}`
+
 func TestEnsureRepairsRelaxedJSONUnquotedPropertyKey(t *testing.T) {
 	got, err := schema_compliance.Ensure(`{name: "Ada"}`, basicObjectSchema)
 	if err != nil {
@@ -66,6 +71,93 @@ func TestEnsureRepairsRelaxedJSONBareIdentifierValue(t *testing.T) {
 	if got != `{"name":"Ada"}` {
 		t.Fatalf("Ensure() = %q, want %q", got, `{"name":"Ada"}`)
 	}
+}
+
+func TestEnsureRepairsRelaxedJSONBareIdentifierArray(t *testing.T) {
+	got, err := schema_compliance.Ensure(`[risk, pricing]`, relaxedStringArraySchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `["risk","pricing"]` {
+		t.Fatalf("Ensure() = %q, want %q", got, `["risk","pricing"]`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONBareIdentifierArrayProperty(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["tags"],
+	  "properties": {
+	    "tags": {
+	      "type": "array",
+	      "items": {"type": "string"}
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{tags:[risk, pricing]}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"tags":["risk","pricing"]}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"tags":["risk","pricing"]}`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONNestedBareIdentifierArrays(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["groups"],
+	  "properties": {
+	    "groups": {
+	      "type": "array",
+	      "items": {
+	        "type": "array",
+	        "items": {"type": "string"}
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{groups:[[risk, pricing]]}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"groups":[["risk","pricing"]]}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"groups":[["risk","pricing"]]}`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONMixedBareAndQuotedStringArray(t *testing.T) {
+	got, err := schema_compliance.Ensure(`[risk, "pricing"]`, relaxedStringArraySchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `["risk","pricing"]` {
+		t.Fatalf("Ensure() = %q, want %q", got, `["risk","pricing"]`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONSpecialBareArrayValues(t *testing.T) {
+	const schema = `{
+	  "type": "array",
+	  "items": {"type": ["boolean", "null"]}
+	}`
+
+	got, err := schema_compliance.Ensure(`[true, false, null, undefined]`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `[true,false,null,null]` {
+		t.Fatalf("Ensure() = %q, want %q", got, `[true,false,null,null]`)
+	}
+}
+
+func TestEnsureDoesNotRepairRelaxedJSONArrayIdentifierWithSpaces(t *testing.T) {
+	_, err := schema_compliance.Ensure(`[high risk, pricing]`, relaxedStringArraySchema)
+	assertInvalidJSONError(t, err)
 }
 
 func TestEnsureRepairsRelaxedJSONUndefinedValueToNull(t *testing.T) {

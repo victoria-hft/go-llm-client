@@ -777,6 +777,47 @@ func TestEnsureFullPipelineRepairsUndefinedWithItemItemsAndNesting(t *testing.T)
 	assertEnsurePipeline(t, input, schema, want)
 }
 
+func TestEnsureFullPipelineRepairsFencedBareArrayWithEnumAndScalarFixes(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["tags", "status", "score"],
+	  "properties": {
+	    "tags": {
+	      "type": "array",
+	      "items": {"type": "string"}
+	    },
+	    "status": {"type": "string", "enum": ["in-progress", "done"]},
+	    "score": {"type": "number"}
+	  },
+	  "additionalProperties": false
+	}`
+	input := "Here is the value:\n```json\n{tags:[risk, pricing], status:'IN_PROGRESS', score:'3/4'}\n```"
+	want := `{"score":0.75,"status":"in-progress","tags":["risk","pricing"]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsWrappedBareArrayOutput(t *testing.T) {
+	input := `{answer:{text:'case',tags:[risk, pricing]}}`
+	want := `{"tags":["risk","pricing"],"text":"case"}`
+
+	assertEnsurePipeline(t, input, pipelineTextTagsSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsBareArrayAfterZeroWidthKeyCleanup(t *testing.T) {
+	const zwsp = "\u200b"
+
+	input := `{"te` + zwsp + `xt":"case",tags:[risk, pricing]}`
+	want := `{"tags":["risk","pricing"],"text":"case"}`
+
+	assertEnsurePipeline(t, input, pipelineTextTagsSchema, want)
+}
+
+func TestEnsureFullPipelineRejectsUnsafeBareArrayToken(t *testing.T) {
+	_, err := schema_compliance.Ensure("```json\n{text:'case',tags:[high risk, pricing]}\n```", pipelineTextTagsSchema)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindInvalidJSON)
+}
+
 func TestEnsureFullPipelineRepairsEnumExplanationWithScalarAndWrapperFixes(t *testing.T) {
 	const schema = `{
 	  "type": "object",
