@@ -467,6 +467,133 @@ func TestEnsureFullPipelineRepairsNumericScalarsWithExistingStages(t *testing.T)
 	assertEnsurePipeline(t, input, pipelineNumericMetricsSchema, want)
 }
 
+func TestEnsureFullPipelineRepairsFencedRelaxedMissingHTTPSURL(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["source_url", "status"],
+	  "properties": {
+	    "source_url": {"type": "string"},
+	    "status": {
+	      "type": "string",
+	      "enum": ["in-progress", "done"]
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "Here is the value:\n```\n{source_url:'x.com/a b', status:'IN_PROGRESS'}\n```"
+	want := `{"source_url":"https://x.com/a%20b","status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsWrappedURIWhitespaceWithDateAndNumber(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["url", "date", "score"],
+	  "properties": {
+	    "url": {"type": "string", "format": "uri"},
+	    "date": {"type": "string", "format": "date"},
+	    "score": {"type": "number"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{payload:{url:'https://x.com/report path?q=a b', date:'28 May 2026', score:'3/4'}}`
+	want := `{"date":"2026-05-28","score":0.75,"url":"https://x.com/report%20path?q=a%20b"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNumericKeyArrayItemsWithURLs(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["links"],
+	  "properties": {
+	    "links": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["url", "active"],
+	        "properties": {
+	          "url": {"type": "string", "format": "uri"},
+	          "active": {"type": "boolean"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{result:{links:{"1":{url:'x.com/a b', active:"\u2705"}, "2":{url:'example.com/c d', active:"\u274c"}}}}`
+	want := `{"links":[{"active":true,"url":"https://x.com/a%20b"},{"active":false,"url":"https://example.com/c%20d"}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsSmartQuotesZeroWidthURLKeyAndEnumExplanation(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["source_url", "sentiment"],
+	  "properties": {
+	    "source_url": {"type": "string"},
+	    "sentiment": {
+	      "type": "string",
+	      "enum": ["positive", "neutral", "negative"]
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+	const zwsp = "\u200b"
+
+	input := "```json\n{“source_" + zwsp + "url”: “x.com/café path”, sentiment:'Positive: customer is satisfied'}\n```"
+	want := `{"sentiment":"positive","source_url":"https://x.com/caf%C3%A9%20path"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsItemItemsShapeWithURLAndScalarFixes(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["items"],
+	  "properties": {
+	    "items": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["url", "score"],
+	        "properties": {
+	          "url": {"type": "string", "format": "uri"},
+	          "score": {"type": "number"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "```json\n{item:{url:'x.com/a b', score:'1_000'}}\n```"
+	want := `{"items":[{"score":1000,"url":"https://x.com/a%20b"}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRejectsURLRepairWhenSchemaDoesNotAllowIt(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["target"],
+	  "properties": {
+	    "target": {"type": "string", "pattern": "^https://"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	_, err := schema_compliance.Ensure("```json\n{payload:{target:'x.com/a b'}}\n```", schema)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
+}
+
 func TestEnsureFullPipelineRepairsEnumExplanationWithScalarAndWrapperFixes(t *testing.T) {
 	const schema = `{
 	  "type": "object",

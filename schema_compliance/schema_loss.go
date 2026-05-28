@@ -26,7 +26,7 @@ func schemaLoss(jsonText string, schema *jsonschema.Schema) int {
 		return invalidJSONLoss
 	}
 	if err := schema.Validate(value); err == nil {
-		return canonicalFormatValueLoss(value, resolveSchemaRef(schema))
+		return canonicalFormatValueLoss(value, resolveSchemaRef(schema), "")
 	}
 	loss := valueLoss(value, resolveSchemaRef(schema))
 	if loss <= 0 {
@@ -35,7 +35,7 @@ func schemaLoss(jsonText string, schema *jsonschema.Schema) int {
 	return loss
 }
 
-func canonicalFormatValueLoss(value any, schema *jsonschema.Schema) int {
+func canonicalFormatValueLoss(value any, schema *jsonschema.Schema, propertyName string) int {
 	schema = resolveSchemaRef(schema)
 	if schema == nil {
 		return 0
@@ -47,11 +47,16 @@ func canonicalFormatValueLoss(value any, schema *jsonschema.Schema) int {
 			loss += canonicalFormatLoss
 		}
 	}
+	if text, ok := value.(string); ok && (schemaExpectsURL(schema) || propertyNameLooksLikeURL(propertyName)) {
+		if canonical, ok := parseConservativeURL(text); ok && canonical != text {
+			loss += canonicalFormatLoss
+		}
+	}
 
 	if object, ok := value.(map[string]any); ok {
 		for name, propertySchema := range schema.Properties {
 			if propertyValue, ok := object[name]; ok {
-				loss += canonicalFormatValueLoss(propertyValue, propertySchema)
+				loss += canonicalFormatValueLoss(propertyValue, propertySchema, name)
 			}
 		}
 	}
@@ -61,7 +66,7 @@ func canonicalFormatValueLoss(value any, schema *jsonschema.Schema) int {
 			itemLoss := 0
 			foundSchema := false
 			for _, itemSchema := range itemSchemasForIndex(arrayItemSchemas(schema), schema, index) {
-				lossForSchema := canonicalFormatValueLoss(item, itemSchema)
+				lossForSchema := canonicalFormatValueLoss(item, itemSchema, propertyName)
 				if !foundSchema || lossForSchema < itemLoss {
 					itemLoss = lossForSchema
 				}
@@ -73,26 +78,26 @@ func canonicalFormatValueLoss(value any, schema *jsonschema.Schema) int {
 
 	if len(schema.AllOf) > 0 {
 		for _, branch := range schema.AllOf {
-			loss += canonicalFormatValueLoss(value, branch)
+			loss += canonicalFormatValueLoss(value, branch, propertyName)
 		}
 	}
 	if len(schema.AnyOf) > 0 {
-		loss += closestCanonicalFormatBranchLoss(value, schema.AnyOf)
+		loss += closestCanonicalFormatBranchLoss(value, schema.AnyOf, propertyName)
 	}
 	if len(schema.OneOf) > 0 {
-		loss += closestCanonicalFormatBranchLoss(value, schema.OneOf)
+		loss += closestCanonicalFormatBranchLoss(value, schema.OneOf, propertyName)
 	}
 	return loss
 }
 
-func closestCanonicalFormatBranchLoss(value any, branches []*jsonschema.Schema) int {
+func closestCanonicalFormatBranchLoss(value any, branches []*jsonschema.Schema, propertyName string) int {
 	if len(branches) == 0 {
 		return 0
 	}
 
 	best := validationFallbackLoss
 	for _, branch := range branches {
-		if loss := canonicalFormatValueLoss(value, branch); loss < best {
+		if loss := canonicalFormatValueLoss(value, branch, propertyName); loss < best {
 			best = loss
 		}
 	}

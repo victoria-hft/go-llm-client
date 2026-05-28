@@ -3,6 +3,7 @@ package schema_compliance
 import (
 	"encoding/json"
 	"math/big"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ var bigIntPattern = regexp.MustCompile(`^[+-]?\d+n$`)
 var fractionPattern = regexp.MustCompile(`^[+-]?\d+/[+-]?\d+$`)
 var percentPattern = regexp.MustCompile(`^[+-]?\d+(?:\.\d+)?%$`)
 var basisPointsPattern = regexp.MustCompile(`^([+-]?\d+(?:\.\d+)?)\s*(?i:bps)$`)
+var urlHostPattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+(:[0-9]{1,5})?$`)
 
 const (
 	maxEpochSeconds = 32503680000
@@ -36,7 +38,7 @@ func repairScalarSchemaValues(current string, schema *jsonschema.Schema) (string
 
 	currentLoss := schemaLoss(current, schema)
 	var repaired string
-	found := enumerateScalarSchemaValueCandidates(value, schema, func(candidate any) bool {
+	found := enumerateScalarSchemaValueCandidates(value, schema, "", func(candidate any) bool {
 		candidateJSON, err := marshalCanonicalJSON(candidate)
 		if err != nil {
 			return false
@@ -50,12 +52,12 @@ func repairScalarSchemaValues(current string, schema *jsonschema.Schema) (string
 	return repaired, found
 }
 
-func enumerateScalarSchemaValueCandidates(value any, schema *jsonschema.Schema, yield func(any) bool) bool {
+func enumerateScalarSchemaValueCandidates(value any, schema *jsonschema.Schema, propertyName string, yield func(any) bool) bool {
 	branches := candidateSchemaBranches(schema)
 
 	if text, ok := value.(string); ok {
 		for _, branch := range branches {
-			if candidate, ok := scalarSchemaValueCandidate(text, branch); ok {
+			if candidate, ok := scalarSchemaValueCandidate(text, branch, propertyName); ok {
 				if yield(candidate) {
 					return true
 				}
@@ -83,7 +85,7 @@ func enumerateScalarSchemaValueCandidates(value any, schema *jsonschema.Schema, 
 				if !ok {
 					continue
 				}
-				if enumerateScalarSchemaValueCandidates(child, propertySchema, func(candidateChild any) bool {
+				if enumerateScalarSchemaValueCandidates(child, propertySchema, key, func(candidateChild any) bool {
 					candidate := cloneJSONObject(object)
 					candidate[key] = candidateChild
 					return yield(candidate)
@@ -99,7 +101,7 @@ func enumerateScalarSchemaValueCandidates(value any, schema *jsonschema.Schema, 
 		for _, branch := range branches {
 			for index, item := range array {
 				for _, itemSchema := range itemSchemasForIndex(arrayItemSchemas(branch), branch, index) {
-					if enumerateScalarSchemaValueCandidates(item, itemSchema, func(candidateItem any) bool {
+					if enumerateScalarSchemaValueCandidates(item, itemSchema, propertyName, func(candidateItem any) bool {
 						candidate := cloneJSONArray(array)
 						candidate[index] = candidateItem
 						return yield(candidate)
@@ -114,12 +116,17 @@ func enumerateScalarSchemaValueCandidates(value any, schema *jsonschema.Schema, 
 	return false
 }
 
-func scalarSchemaValueCandidate(value string, schema *jsonschema.Schema) (any, bool) {
+func scalarSchemaValueCandidate(value string, schema *jsonschema.Schema, propertyName string) (any, bool) {
 	schema = resolveSchemaRef(schema)
 	if schema == nil {
 		return nil, false
 	}
 
+	if schemaExpectsURL(schema) || propertyNameLooksLikeURL(propertyName) {
+		if repairedURL, ok := parseConservativeURL(value); ok {
+			return repairedURL, true
+		}
+	}
 	if schemaAllowsType(schema, "null") && isPlaceholderString(value) {
 		return nil, true
 	}
@@ -222,6 +229,118 @@ func schemaExpectsISODuration(schema *jsonschema.Schema) bool {
 		schema.Format != nil &&
 		schema.Format.Name == "duration" &&
 		(schema.Types == nil || schema.Types.IsEmpty() || schemaAllowsType(schema, "string"))
+}
+
+func schemaExpectsURL(schema *jsonschema.Schema) bool {
+	return schema != nil &&
+		schema.Format != nil &&
+		(schema.Format.Name == "uri" || schema.Format.Name == "uri-reference" || schema.Format.Name == "url") &&
+		(schema.Types == nil || schema.Types.IsEmpty() || schemaAllowsType(schema, "string"))
+}
+
+func propertyNameLooksLikeURL(propertyName string) bool {
+	lower := strings.ToLower(propertyName)
+	return strings.Contains(lower, "url") ||
+		strings.Contains(lower, "uri") ||
+		strings.Contains(lower, "link") ||
+		strings.Contains(lower, "source")
+}
+
+func parseConservativeURL(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.ContainsAny(trimmed, "\r\n\t") {
+		return "", false
+	}
+
+	candidate := trimmed
+	if !strings.Contains(candidate, "://") {
+		if !isClearlySchemelessHTTPURL(candidate) {
+			return "", false
+		}
+		candidate = "https://" + candidate
+	}
+
+	parsed, err := url.Parse(candidate)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", false
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", false
+	}
+	if !isValidURLHost(parsed.Host) {
+		return "", false
+	}
+	parsed.RawQuery = escapeURLRawQuery(parsed.RawQuery)
+
+	repaired := parsed.String()
+	reparsed, err := url.ParseRequestURI(repaired)
+	if err != nil {
+		return "", false
+	}
+	if reparsed.Scheme != "http" && reparsed.Scheme != "https" {
+		return "", false
+	}
+	if repaired == value {
+		return "", false
+	}
+	return repaired, true
+}
+
+func isClearlySchemelessHTTPURL(value string) bool {
+	host, _, _ := strings.Cut(value, "/")
+	host, _, _ = strings.Cut(host, "?")
+	host, _, _ = strings.Cut(host, "#")
+	if host == "" || strings.ContainsAny(host, " @") {
+		return false
+	}
+	return isValidURLHost(host)
+}
+
+func isValidURLHost(host string) bool {
+	if strings.Contains(host, "@") {
+		return false
+	}
+	hostname := host
+	if parsedHost, _, err := strings.Cut(host, ":"); err && parsedHost != "" {
+		hostname = parsedHost
+	}
+	if strings.HasPrefix(hostname, "[") || strings.HasSuffix(hostname, "]") {
+		return false
+	}
+	return urlHostPattern.MatchString(host)
+}
+
+func escapeURLRawQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+
+	var builder strings.Builder
+	for index, r := range rawQuery {
+		switch {
+		case r == '%' && index+2 < len(rawQuery) && isHexDigit(rawQuery[index+1]) && isHexDigit(rawQuery[index+2]):
+			builder.WriteRune(r)
+		case isURLQuerySafeRune(r):
+			builder.WriteRune(r)
+		default:
+			escaped := url.QueryEscape(string(r))
+			escaped = strings.ReplaceAll(escaped, "+", "%20")
+			builder.WriteString(escaped)
+		}
+	}
+	return builder.String()
+}
+
+func isURLQuerySafeRune(r rune) bool {
+	if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+		return true
+	}
+	switch r {
+	case '-', '.', '_', '~', '!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=', ':', '@', '/', '?':
+		return true
+	default:
+		return false
+	}
 }
 
 func parseConservativeDate(value string) (string, bool) {

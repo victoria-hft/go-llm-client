@@ -87,6 +87,24 @@ const booleanValueSchema = `{
   "additionalProperties": false
 }`
 
+const uriValueSchema = `{
+  "type": "object",
+  "required": ["url"],
+  "properties": {
+    "url": {"type": "string", "format": "uri"}
+  },
+  "additionalProperties": false
+}`
+
+const httpURLValueSchema = `{
+  "type": "object",
+  "required": ["url"],
+  "properties": {
+    "url": {"type": "string", "pattern": "^https?://[^/]+\\."}
+  },
+  "additionalProperties": false
+}`
+
 func TestEnsureRepairsHumanDateToISODate(t *testing.T) {
 	got, err := schema_compliance.Ensure(`{"date":"28 May 2026"}`, isoDateSchema)
 	if err != nil {
@@ -465,6 +483,185 @@ func TestEnsureDoesNotRepairFloatStringForIntegerSchema(t *testing.T) {
 
 	_, err := schema_compliance.Ensure(`{"count":"42.5"}`, schema)
 	assertSchemaViolationError(t, err)
+}
+
+func TestEnsureRepairsURLWhitespaceForURISchema(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"url":"https://x.com/a b"}`, uriValueSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"url":"https://x.com/a%20b"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"url":"https://x.com/a%20b"}`)
+	}
+}
+
+func TestEnsureRepairsURLCharactersByEncoding(t *testing.T) {
+	tests := map[string]string{
+		"https://x.com/search?q=a b": "https://x.com/search?q=a%20b",
+		"https://x.com/café":         "https://x.com/caf%C3%A9",
+	}
+
+	for input, wantURL := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"url":"`+input+`"}`, uriValueSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"url":"` + wantURL + `"}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsMissingHTTPSForURISchema(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"url":"x.com/foo/bar"}`, uriValueSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"url":"https://x.com/foo/bar"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"url":"https://x.com/foo/bar"}`)
+	}
+}
+
+func TestEnsureRepairsURLByPropertyNameWithoutFormat(t *testing.T) {
+	tests := []string{"source_url", "callbackURI", "link", "source"}
+	for _, propertyName := range tests {
+		t.Run(propertyName, func(t *testing.T) {
+			schema := `{
+			  "type": "object",
+			  "required": ["` + propertyName + `"],
+			  "properties": {
+			    "` + propertyName + `": {"type": "string"}
+			  },
+			  "additionalProperties": false
+			}`
+
+			got, err := schema_compliance.Ensure(`{"`+propertyName+`":"x.com/foo bar"}`, schema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"` + propertyName + `":"https://x.com/foo%20bar"}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsURLRecursivelyInObjectArray(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["links"],
+	  "properties": {
+	    "links": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["callbackURL"],
+	        "properties": {
+	          "callbackURL": {"type": "string"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"links":[{"callbackURL":"x.com/a b"}]}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"links":[{"callbackURL":"https://x.com/a%20b"}]}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"links":[{"callbackURL":"https://x.com/a%20b"}]}`)
+	}
+}
+
+func TestEnsureRepairsURLUsingOneOfBranch(t *testing.T) {
+	const schema = `{
+	  "oneOf": [
+	    {
+	      "type": "object",
+	      "required": ["url"],
+	      "properties": {"url": {"type": "string", "format": "uri"}},
+	      "additionalProperties": false
+	    },
+	    {
+	      "type": "object",
+	      "required": ["count"],
+	      "properties": {"count": {"type": "integer"}},
+	      "additionalProperties": false
+	    }
+	  ]
+	}`
+
+	got, err := schema_compliance.Ensure(`{"url":"x.com/a b"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"url":"https://x.com/a%20b"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"url":"https://x.com/a%20b"}`)
+	}
+}
+
+func TestEnsureRepairsMultipleURLsThroughSchemaLoop(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["source_url", "callback_url"],
+	  "properties": {
+	    "source_url": {"type": "string"},
+	    "callback_url": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"source_url":"x.com/a b","callback_url":"example.com/c d"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"callback_url":"https://example.com/c%20d","source_url":"https://x.com/a%20b"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"callback_url":"https://example.com/c%20d","source_url":"https://x.com/a%20b"}`)
+	}
+}
+
+func TestEnsureDoesNotRepairURLForNonURLStringField(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"name":"x.com/foo bar"}`, basicObjectSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"name":"x.com/foo bar"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"name":"x.com/foo bar"}`)
+	}
+}
+
+func TestEnsureDoesNotRepairUnsafeURLs(t *testing.T) {
+	tests := []string{
+		"example",
+		"/foo/bar",
+		"foo bar",
+		"mailto:x@y.com",
+		"ht!tp://x.com",
+		"https://x",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			_, err := schema_compliance.Ensure(`{"url":"`+input+`"}`, httpURLValueSchema)
+			assertSchemaViolationError(t, err)
+		})
+	}
+}
+
+func TestEnsureDoesNotDoubleEncodeValidURL(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"url":"https://x.com/a%20b"}`, uriValueSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"url":"https://x.com/a%20b"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"url":"https://x.com/a%20b"}`)
+	}
 }
 
 func TestEnsureRepairsBooleanMarkerStrings(t *testing.T) {
