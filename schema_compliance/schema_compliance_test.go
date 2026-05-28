@@ -18,6 +18,48 @@ const basicObjectSchema = `{
   "additionalProperties": false
 }`
 
+const xNumberSchema = `{
+  "type": "object",
+  "required": ["x"],
+  "properties": {
+    "x": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": false
+}`
+
+func TestEnsureStripsUTF8BOMBeforeJSON(t *testing.T) {
+	got, err := schema_compliance.Ensure("\ufeff{\"x\":1}", xNumberSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"x":1}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"x":1}`)
+	}
+}
+
+func TestEnsureStripsCommonTransportJunkBeforeJSON(t *testing.T) {
+	tests := map[string]string{
+		"mojibake_bom":       "ï»¿{\"x\":1}",
+		"leading_nul":        "\x00{\"x\":1}",
+		"replacement_prefix": "���{\"x\":1}",
+		"mixed_junk":         "\x00\ufeff���{\"x\":1}",
+	}
+
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(input, xNumberSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			if got != `{"x":1}` {
+				t.Fatalf("Ensure() = %q, want %q", got, `{"x":1}`)
+			}
+		})
+	}
+}
+
 func TestEnsureExtractsJSONFencedBlockWithLanguage(t *testing.T) {
 	got, err := schema_compliance.Ensure("Here is the result:\n```json {\"name\":\"Ada\"} ```", basicObjectSchema)
 	if err != nil {
