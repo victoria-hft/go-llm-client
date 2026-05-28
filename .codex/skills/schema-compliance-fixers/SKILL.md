@@ -73,7 +73,9 @@ For each fixer, add public `Ensure` tests and any needed package-internal tests.
 
 - Public tests should cover the intended end-to-end repair, a recursive case when traversal is involved, and a conservative rejection case.
 - Internal tests are useful for one-change-per-invocation behavior, candidate ordering, and direct `schemaLoss` ordering.
-- Include combined-pipeline tests when a fixer depends on an earlier stage changing the input first.
+- Add or update at least one full-pipeline `Ensure(input, schema) -> output/error` test whenever a fixer behavior changes, unless the change is purely internal and cannot affect observable behavior.
+- Full-pipeline tests should combine the new or changed fixer with at least one fixer from another stage when feasible. They should prove the complete process handles realistic multi-problem LLM output, not just one isolated repair.
+- Keep focused fixer tests and package-internal tests. Pipeline tests are additive and do not replace tests for the local fixer rules or conservative rejection behavior.
 - Error assertions should use existing helpers such as `assertInvalidJSONError` or `assertSchemaViolationError` when available.
 
 ## Validation Commands
