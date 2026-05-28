@@ -16,5 +16,6 @@ func schemaComplianceFixes() []schemaFixFunc {
 	return []schemaFixFunc{
 		unwrapResponseObject,
 		unwrapSingleItemArray,
+		repairObjectFieldNesting,
 	}
 }
