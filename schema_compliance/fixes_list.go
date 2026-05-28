@@ -21,5 +21,6 @@ func schemaComplianceFixes() []schemaFixFunc {
 		unwrapSingleItemArray,
 		repairObjectFieldNesting,
 		repairScalarSchemaValues,
+		repairEnumStringValues,
 	}
 }

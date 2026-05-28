@@ -195,6 +195,13 @@ func TestEnsureFullPipelineRepairsOneOfBranchAfterWrapperUnwrapAndScalarOutput(t
 	assertEnsurePipeline(t, input, pipelineOneOfCountOrDateSchema, want)
 }
 
+func TestEnsureFullPipelineRepairsFencedRelaxedWrappedEnumOutput(t *testing.T) {
+	input := "Here is the value:\n```json\n{payload:{status:'IN_PROGRESS'}}\n```"
+	want := `{"status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, statusEnumSchema, want)
+}
+
 func TestEnsureFullPipelineRepeatsSchemaStageForNestingAndMultipleScalars(t *testing.T) {
 	input := `{"name":"Ada","event":{"date":"28 May 2026","city":"Paris","country":"France"},"score":"42.5","status":"not available","tags":["research"]}`
 	want := `{"event":{"date":"2026-05-28","location":{"city":"Paris","country":"France"}},"name":"Ada","score":42.5,"status":null,"tags":["research"]}`
