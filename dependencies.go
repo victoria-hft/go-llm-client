@@ -1,6 +1,7 @@
 package llmclient
 
 import (
+	_ "github.com/anthropics/anthropic-sdk-go"
 	_ "github.com/ollama/ollama/api"
 	_ "github.com/openai/openai-go"
 	_ "github.com/santhosh-tekuri/jsonschema/v6"
