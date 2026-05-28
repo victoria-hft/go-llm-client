@@ -54,16 +54,6 @@ func Ensure(output string, schemaJSON string) (string, error) {
 
 type fixFunc func(string) (string, bool)
 
-func oneTimeFixes() []fixFunc {
-	return []fixFunc{
-		extractSurroundedFencedJSON,
-	}
-}
-
-func iterativeFixes() []fixFunc {
-	return nil
-}
-
 // ValidateJSON returns nil when output is syntactically valid JSON.
 func ValidateJSON(output string) error {
 	_, _, err := parseAndNormalizeJSON(output)
