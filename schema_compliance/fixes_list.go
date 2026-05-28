@@ -7,6 +7,12 @@ func oneTimeFixes() []fixFunc {
 	}
 }
 
+func schemaOneTimeFixes() []schemaOneTimeFixFunc {
+	return []schemaOneTimeFixFunc{
+		repairNDJSONArrayOutput,
+	}
+}
+
 func jsonSyntaxFixes() []fixFunc {
 	return []fixFunc{
 		repairSmartQuoteDelimiters,

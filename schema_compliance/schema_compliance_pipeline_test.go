@@ -594,6 +594,131 @@ func TestEnsureFullPipelineRejectsURLRepairWhenSchemaDoesNotAllowIt(t *testing.T
 	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
 }
 
+func TestEnsureFullPipelineRepairsFencedNDJSONWithScalarAndEnumFixes(t *testing.T) {
+	const schema = `{
+	  "type": "array",
+	  "items": {
+	    "type": "object",
+	    "required": ["date", "score", "status"],
+	    "properties": {
+	      "date": {"type": "string", "format": "date"},
+	      "score": {"type": "number"},
+	      "status": {"type": "string", "enum": ["ready", "done"]}
+	    },
+	    "additionalProperties": false
+	  }
+	}`
+	input := "Rows:\n```json\n" +
+		"{\"date\":\"28 May 2026\",\"score\":\"42.5\",\"status\":\"READY\"}\n" +
+		"{\"date\":\"2026/05/29\",\"score\":\"3/4\",\"status\":\"Done: complete\"}\n" +
+		"```\n"
+	want := `[{"date":"2026-05-28","score":42.5,"status":"ready"},{"date":"2026-05-29","score":0.75,"status":"done"}]`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNDJSONItemsWithNumericKeyArrays(t *testing.T) {
+	const schema = `{
+	  "type": "array",
+	  "items": {
+	    "type": "object",
+	    "required": ["name", "steps"],
+	    "properties": {
+	      "name": {"type": "string"},
+	      "steps": {
+	        "type": "array",
+	        "items": {"type": "string"}
+	      }
+	    },
+	    "additionalProperties": false
+	  }
+	}`
+	input := "{\"name\":\"build\",\"steps\":{\"0\":\"go test\",\"1\":\"make\"}}\n" +
+		"{\"name\":\"deploy\",\"steps\":{\"1\":\"plan\",\"2\":\"apply\"}}"
+	want := `[{"name":"build","steps":["go test","make"]},{"name":"deploy","steps":["plan","apply"]}]`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNDJSONItemsWithKeyCleanupAndURLRepair(t *testing.T) {
+	const zwsp = "\u200b"
+	const schema = `{
+	  "type": "array",
+	  "items": {
+	    "type": "object",
+	    "required": ["source_url", "title"],
+	    "properties": {
+	      "source_url": {"type": "string"},
+	      "title": {"type": "string"}
+	    },
+	    "additionalProperties": false
+	  }
+	}`
+	input := "{\"source_" + zwsp + "url\":\"x.com/a b\",\"title\":\"A\"}\n" +
+		"{\"source_url\":\"example.com/c d\",\"title\":\"B\"}"
+	want := `[{"source_url":"https://x.com/a%20b","title":"A"},{"source_url":"https://example.com/c%20d","title":"B"}]`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNDJSONItemsWithItemItemsAndNesting(t *testing.T) {
+	const schema = `{
+	  "type": "array",
+	  "items": {
+	    "type": "object",
+	    "required": ["items", "event"],
+	    "properties": {
+	      "items": {
+	        "type": "array",
+	        "items": {"type": "string"}
+	      },
+	      "event": {
+	        "type": "object",
+	        "required": ["location"],
+	        "properties": {
+	          "location": {
+	            "type": "object",
+	            "required": ["city", "country"],
+	            "properties": {
+	              "city": {"type": "string"},
+	              "country": {"type": "string"}
+	            },
+	            "additionalProperties": false
+	          }
+	        },
+	        "additionalProperties": false
+	      }
+	    },
+	    "additionalProperties": false
+	  }
+	}`
+	input := "{\"item\":\"alpha\",\"event\":{\"city\":\"Paris\",\"country\":\"France\"}}\n" +
+		"{\"item\":\"beta\",\"event\":{\"city\":\"London\",\"country\":\"UK\"}}"
+	want := `[{"event":{"location":{"city":"Paris","country":"France"}},"items":["alpha"]},{"event":{"location":{"city":"London","country":"UK"}},"items":["beta"]}]`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRejectsNDJSONWhenOneItemCannotBecomeCompliant(t *testing.T) {
+	input := "{\"date\":\"28 May 2026\",\"score\":\"42.5\",\"status\":\"READY\"}\n" +
+		"{\"date\":\"05/06/2026\",\"score\":\"not numeric\",\"status\":\"ready\"}"
+
+	_, err := schema_compliance.Ensure(input, `{
+	  "type": "array",
+	  "items": {
+	    "type": "object",
+	    "required": ["date", "score", "status"],
+	    "properties": {
+	      "date": {"type": "string", "format": "date"},
+	      "score": {"type": "number"},
+	      "status": {"type": "string", "enum": ["ready", "done"]}
+	    },
+	    "additionalProperties": false
+	  }
+	}`)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
+}
+
 func TestEnsureFullPipelineRepairsEnumExplanationWithScalarAndWrapperFixes(t *testing.T) {
 	const schema = `{
 	  "type": "object",

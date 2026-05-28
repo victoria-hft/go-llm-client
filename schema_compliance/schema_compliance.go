@@ -29,6 +29,12 @@ func Ensure(output string, schemaJSON string) (string, error) {
 			current = next
 		}
 	}
+	for _, fix := range schemaOneTimeFixes() {
+		next, changed := fix(current, schema)
+		if changed {
+			current = next
+		}
+	}
 
 	current = runFixesUntilStable(current, jsonSyntaxFixes())
 	if err := ValidateJSON(current); err != nil {
@@ -48,6 +54,7 @@ func Ensure(output string, schemaJSON string) (string, error) {
 }
 
 type fixFunc func(string) (string, bool)
+type schemaOneTimeFixFunc func(string, *jsonschema.Schema) (string, bool)
 type schemaFixFunc func(string, *jsonschema.Schema) (string, bool)
 
 func runFixesUntilStable(current string, fixes []fixFunc) string {
