@@ -768,3 +768,113 @@ func TestEnsureDoesNotRepairPlaceholderWhenArbitraryStringIsAllowed(t *testing.T
 		t.Fatalf("Ensure() = %q, want %q", got, `{"name":"unknown"}`)
 	}
 }
+
+func TestEnsureRepairsNaNStringToNullForNullableNumber(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x"],
+	  "properties": {
+	    "x": {"type": ["number", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"x":NaN}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"x":null}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"x":null}`)
+	}
+}
+
+func TestEnsureRepairsNaNStringToNullInNestedObjectAndArray(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["profile", "values"],
+	  "properties": {
+	    "profile": {
+	      "type": "object",
+	      "required": ["score"],
+	      "properties": {
+	        "score": {"type": ["number", "null"]}
+	      },
+	      "additionalProperties": false
+	    },
+	    "values": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["score"],
+	        "properties": {
+	          "score": {"type": ["number", "null"]}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{profile:{score:NaN},values:[{score:NaN}]}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	want := `{"profile":{"score":null},"values":[{"score":null}]}`
+	if got != want {
+		t.Fatalf("Ensure() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureRepairsMultipleNaNValuesThroughSchemaLoop(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["first", "second"],
+	  "properties": {
+	    "first": {"type": ["number", "null"]},
+	    "second": {"type": ["number", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"first":NaN,"second":NaN}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"first":null,"second":null}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"first":null,"second":null}`)
+	}
+}
+
+func TestEnsureDoesNotRepairNaNForNonNullableNumber(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x"],
+	  "properties": {
+	    "x": {"type": "number"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	_, err := schema_compliance.Ensure(`{"x":NaN}`, schema)
+	assertSchemaViolationError(t, err)
+}
+
+func TestEnsureDoesNotRepairNaNForNullableString(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x"],
+	  "properties": {
+	    "x": {"type": ["string", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"x":NaN}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"x":"NaN"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"x":"NaN"}`)
+	}
+}

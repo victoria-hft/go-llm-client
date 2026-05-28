@@ -128,6 +128,28 @@ func TestRepairScalarSchemaValuesDoesNotRepairPercentWithoutBounds(t *testing.T)
 	}
 }
 
+func TestRepairScalarSchemaValuesMakesOneNaNChangePerInvocation(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["first", "second"],
+	  "properties": {
+	    "first": {"type": ["number", "null"]},
+	    "second": {"type": ["number", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	got, changed := repairScalarSchemaValues(`{"first":"NaN","second":"NaN"}`, schema)
+	if !changed {
+		t.Fatal("repairScalarSchemaValues did not repair nullable numeric NaN")
+	}
+	want := `{"first":null,"second":"NaN"}`
+	if got != want {
+		t.Fatalf("repairScalarSchemaValues() = %q, want %q", got, want)
+	}
+}
+
 const basicObjectSchemaForInternalScalarTests = `{
   "type": "object",
   "required": ["name"],

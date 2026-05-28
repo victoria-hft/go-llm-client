@@ -236,6 +236,82 @@ func TestEnsureRepairsRelaxedJSONUndefinedNestedAndArrayValues(t *testing.T) {
 	}
 }
 
+func TestEnsureRepairsRelaxedJSONBareNaNValueToString(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x"],
+	  "properties": {
+	    "x": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"x": NaN}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"x":"NaN"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"x":"NaN"}`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONBareNaNValueWithUnquotedKey(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x"],
+	  "properties": {
+	    "x": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{x: NaN}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"x":"NaN"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"x":"NaN"}`)
+	}
+}
+
+func TestEnsureKeepsNaNObjectKey(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["NaN"],
+	  "properties": {
+	    "NaN": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{NaN: "value"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"NaN":"value"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"NaN":"value"}`)
+	}
+}
+
+func TestEnsureKeepsQuotedNaNString(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x"],
+	  "properties": {
+	    "x": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"x":"NaN"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"x":"NaN"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"x":"NaN"}`)
+	}
+}
+
 func TestEnsureKeepsQuotedUndefinedString(t *testing.T) {
 	got, err := schema_compliance.Ensure(`{"name":"undefined"}`, basicObjectSchema)
 	if err != nil {

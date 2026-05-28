@@ -127,6 +127,9 @@ func scalarSchemaValueCandidate(value string, schema *jsonschema.Schema, propert
 			return repairedURL, true
 		}
 	}
+	if schemaAllowsType(schema, "number") && schemaAllowsType(schema, "null") && value == "NaN" {
+		return nil, true
+	}
 	if schemaAllowsType(schema, "null") && isPlaceholderString(value) {
 		return nil, true
 	}

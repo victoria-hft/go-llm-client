@@ -818,6 +818,87 @@ func TestEnsureFullPipelineRejectsUnsafeBareArrayToken(t *testing.T) {
 	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindInvalidJSON)
 }
 
+func TestEnsureFullPipelineRepairsFencedWrappedNaNNullableNumber(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["score", "status"],
+	  "properties": {
+	    "score": {"type": ["number", "null"]},
+	    "status": {"type": "string", "enum": ["in-progress", "done"]}
+	  },
+	  "additionalProperties": false
+	}`
+	input := "Here is the value:\n```json\n{payload:{score:NaN,status:'IN_PROGRESS'}}\n```"
+	want := `{"score":null,"status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNaNAfterZeroWidthKeyCleanup(t *testing.T) {
+	const zwsp = "\u200b"
+	const schema = `{
+	  "type": "object",
+	  "required": ["score"],
+	  "properties": {
+	    "score": {"type": ["number", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+	input := `{"sco` + zwsp + `re":NaN}`
+	want := `{"score":null}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNaNWithItemItemsAndNesting(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["items", "event", "score"],
+	  "properties": {
+	    "items": {
+	      "type": "array",
+	      "items": {"type": "string"}
+	    },
+	    "event": {
+	      "type": "object",
+	      "required": ["location"],
+	      "properties": {
+	        "location": {
+	          "type": "object",
+	          "required": ["city", "country"],
+	          "properties": {
+	            "city": {"type": "string"},
+	            "country": {"type": "string"}
+	          },
+	          "additionalProperties": false
+	        }
+	      },
+	      "additionalProperties": false
+	    },
+	    "score": {"type": ["number", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+	input := `{item:'alpha',event:{city:'Paris',country:'France'},score:NaN}`
+	want := `{"event":{"location":{"city":"Paris","country":"France"}},"items":["alpha"],"score":null}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRejectsNaNForRequiredNumber(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["score"],
+	  "properties": {
+	    "score": {"type": "number"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	_, err := schema_compliance.Ensure("```json\n{score:NaN}\n```", schema)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
+}
+
 func TestEnsureFullPipelineRepairsEnumExplanationWithScalarAndWrapperFixes(t *testing.T) {
 	const schema = `{
 	  "type": "object",
