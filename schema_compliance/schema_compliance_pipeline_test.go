@@ -116,6 +116,78 @@ const pipelineOneOfCountOrDateSchema = `{
   ]
 }`
 
+const pipelineTextTagsSchema = `{
+  "type": "object",
+  "required": ["text", "tags"],
+  "properties": {
+    "text": {"type": "string"},
+    "tags": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "additionalProperties": false
+}`
+
+const pipelineStringMapSchema = `{
+  "type": "object",
+  "additionalProperties": {"type": "string"}
+}`
+
+const pipelineBuildResultSchema = `{
+  "type": "object",
+  "required": ["title", "status", "commands", "metadata", "note"],
+  "properties": {
+    "title": {"type": "string"},
+    "status": {
+      "type": "string",
+      "enum": ["in-progress", "done"]
+    },
+    "commands": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "note": {"type": "string"}
+  },
+  "additionalProperties": false
+}`
+
+const pipelineNestedBuildsSchema = `{
+  "type": "object",
+  "required": ["builds"],
+  "properties": {
+    "builds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "status", "commands", "metadata", "note"],
+        "properties": {
+          "title": {"type": "string"},
+          "status": {
+            "type": "string",
+            "enum": ["in-progress", "done"]
+          },
+          "commands": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          },
+          "note": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}`
+
 func TestEnsureFullPipelineRepairsTransportJunkFencedRelaxedWrappedNestedScalarOutput(t *testing.T) {
 	const zwsp = "\u200b"
 
@@ -200,6 +272,157 @@ func TestEnsureFullPipelineRepairsFencedRelaxedWrappedEnumOutput(t *testing.T) {
 	want := `{"status":"in-progress"}`
 
 	assertEnsurePipeline(t, input, statusEnumSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsSmartQuotesAndNumericKeyArrayOutput(t *testing.T) {
+	input := "Here is the value:\n```json\n{payload:{“text”: “plain value”, tags: {\"0\": 'a', \"1\": 'b'}}}\n```"
+	want := `{"tags":["a","b"],"text":"plain value"}`
+
+	assertEnsurePipeline(t, input, pipelineTextTagsSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsRelaxedWrappedKeyValueArrayObjectOutput(t *testing.T) {
+	input := "Here is the value:\n```\n{answer:[{name:'a', value:'one'}, {name:'b', value:'two'}]}\n```"
+	want := `{"a":"one","b":"two"}`
+
+	assertEnsurePipeline(t, input, pipelineStringMapSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsBuildResultWithAllNewFixersAndExistingStages(t *testing.T) {
+	input := "Here is the value:\n```json\n" +
+		`{
+		  payload: {
+		    “title”: “Build”,
+		    status: 'IN_PROGRESS',
+		    commands: {“1”: “go test ./...”, “2”: “make”},
+		    metadata: [{name:'os', value:'linux'}, {name:'arch', value:'arm64'}],
+		    note: “escaped text”
+		  }
+		}` +
+		"\n```"
+	want := `{"commands":["go test ./...","make"],"metadata":{"arch":"arm64","os":"linux"},"note":"escaped text","status":"in-progress","title":"Build"}`
+
+	assertEnsurePipeline(t, input, pipelineBuildResultSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsNestedBuildsWithNumericArraysAndKeyValueObjects(t *testing.T) {
+	input := `{
+	  builds: {
+	    "0": {
+	      title: 'Unit',
+	      status: 'DONE',
+	      commands: {"0": "go test ./schema_compliance", "1": "make"},
+	      metadata: [{key: 'suite', value: 'schema'}],
+	      note: "unit checks"
+	    },
+	    "1": {
+	      title: 'Lint',
+	      status: 'in_progress',
+	      commands: {"1": "go fmt ./...", "2": "go vet ./..."},
+	      metadata: [{field: 'suite', value: 'lint'}],
+	      note: "lint checks"
+	    }
+	  }
+	}`
+	want := `{"builds":[{"commands":["go test ./schema_compliance","make"],"metadata":{"suite":"schema"},"note":"unit checks","status":"done","title":"Unit"},{"commands":["go fmt ./...","go vet ./..."],"metadata":{"suite":"lint"},"note":"lint checks","status":"in-progress","title":"Lint"}]}`
+
+	assertEnsurePipeline(t, input, pipelineNestedBuildsSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsSmartQuotesBeforeRelaxedJSON(t *testing.T) {
+	input := "```\n{“text”: “plain value”, tags: {“0”: 'math', “1”: 'proof'}}\n```"
+	want := `{"tags":["math","proof"],"text":"plain value"}`
+
+	assertEnsurePipeline(t, input, pipelineTextTagsSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsKeyValueMapThenEnumAndDateScalars(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["properties", "status", "date"],
+	  "properties": {
+	    "properties": {
+	      "type": "object",
+	      "additionalProperties": {"type": "string"}
+	    },
+	    "status": {
+	      "type": "string",
+	      "enum": ["in-progress", "done"]
+	    },
+	    "date": {"type": "string", "format": "date"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{data:{properties:[{property:'owner', value:'Ada'}, {property:'team', value:'research'}], status:'IN_PROGRESS', date:'28 May 2026'}}`
+	want := `{"date":"2026-05-28","properties":{"owner":"Ada","team":"research"},"status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNumericArrayThenNestedFieldAndScalarValues(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["events"],
+	  "properties": {
+	    "events": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["date", "location", "score"],
+	        "properties": {
+	          "date": {"type": "string", "format": "date"},
+	          "location": {
+	            "type": "object",
+	            "required": ["city", "country"],
+	            "properties": {
+	              "city": {"type": "string"},
+	              "country": {"type": "string"}
+	            },
+	            "additionalProperties": false
+	          },
+	          "score": {"type": "number"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{result:{events:{"1":{date:'28 May 2026', city:'Paris', country:'France', score:'9.5'}, "2":{date:'29 May 2026', city:'Lyon', country:'France', score:'8'}}}}`
+	want := `{"events":[{"date":"2026-05-28","location":{"city":"Paris","country":"France"},"score":9.5},{"date":"2026-05-29","location":{"city":"Lyon","country":"France"},"score":8}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsKeyValueArrayInsideNumericKeyArrayItems(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["rows"],
+	  "properties": {
+	    "rows": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["attributes"],
+	        "properties": {
+	          "attributes": {
+	            "type": "object",
+	            "additionalProperties": {"type": "string"}
+	          }
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{output:{rows:{"0":{attributes:[{id:'a', value:'one'}]}, "1":{attributes:[{key:'b', val:'two'}]}}}}`
+	want := `{"rows":[{"attributes":{"a":"one"}},{"attributes":{"b":"two"}}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
 }
 
 func TestEnsureFullPipelineRepeatsSchemaStageForNestingAndMultipleScalars(t *testing.T) {

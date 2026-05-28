@@ -13,8 +13,9 @@ const (
 	typeMismatchLoss         = 30
 	missingRequiredFieldLoss = 40
 	unexpectedFieldLoss      = 20
-	wrapperContainerLoss     = 100
+	wrapperContainerLoss     = 10_000
 	arrayWrapperLoss         = 50
+	objectArrayWrapperLoss   = 10_000
 	enumOrConstMismatchLoss  = 10
 )
 
@@ -55,6 +56,9 @@ func valueLoss(value any, schema *jsonschema.Schema) int {
 
 	if object, ok := value.(map[string]any); ok {
 		loss += objectLoss(object, schema)
+		if schemaExpectsArray(schema) {
+			loss += objectArrayWrapperLoss
+		}
 	} else if schemaExpectsObject(schema) {
 		loss += missingRequiredLoss(schema)
 	}

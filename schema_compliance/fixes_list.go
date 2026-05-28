@@ -9,6 +9,7 @@ func oneTimeFixes() []fixFunc {
 
 func jsonSyntaxFixes() []fixFunc {
 	return []fixFunc{
+		repairSmartQuoteDelimiters,
 		repairRelaxedJSON,
 		removeZeroWidthCharactersFromKeys,
 		repairTruncatedJSON,
@@ -18,7 +19,9 @@ func jsonSyntaxFixes() []fixFunc {
 func schemaComplianceFixes() []schemaFixFunc {
 	return []schemaFixFunc{
 		unwrapResponseObject,
+		repairKeyValueArrayObject,
 		unwrapSingleItemArray,
+		repairNumericKeyObjectArray,
 		repairObjectFieldNesting,
 		repairScalarSchemaValues,
 		repairEnumStringValues,

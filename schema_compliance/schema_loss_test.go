@@ -65,6 +65,27 @@ func TestSchemaLossScoresSingleItemArrayWorseThanPayload(t *testing.T) {
 	}
 }
 
+func TestSchemaLossScoresNumericKeyObjectForArrayWorseThanNearMissArray(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "array",
+	  "items": {
+	    "type": "object",
+	    "required": ["status"],
+	    "properties": {
+	      "status": {"type": "string", "enum": ["ready"]}
+	    },
+	    "additionalProperties": false
+	  }
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	objectLoss := schemaLoss(`{"0":{"status":"READY"}}`, schema)
+	arrayLoss := schemaLoss(`[{"status":"READY"}]`, schema)
+	if objectLoss <= arrayLoss {
+		t.Fatalf("object loss = %d, array loss = %d, want object > array", objectLoss, arrayLoss)
+	}
+}
+
 func TestSchemaLossScoresSingleItemNearMissArrayWorseThanNearMissPayload(t *testing.T) {
 	schema := mustCompileTestSchema(t, testBasicObjectSchema)
 
