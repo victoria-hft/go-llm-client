@@ -1,5 +1,4 @@
-// Package dependencies records library references used by this module.
-package dependencies
+package llmclient
 
 import (
 	_ "github.com/ollama/ollama/api"
