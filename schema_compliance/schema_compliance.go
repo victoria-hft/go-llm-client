@@ -9,8 +9,6 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-const schemaResource = "schema.json"
-
 // Ensure returns valid JSON that conforms to schemaJSON, or a typed error.
 func Ensure(output string, schemaJSON string) (string, error) {
 	schema, err := compileSchema(schemaJSON)
@@ -82,19 +80,6 @@ func normalizeIfSchemaCompliant(output string, schema *jsonschema.Schema) (strin
 		return "", &Error{Kind: ErrorKindSchemaViolation, Err: err}
 	}
 	return normalized, nil
-}
-
-func compileSchema(schemaJSON string) (*jsonschema.Schema, error) {
-	doc, err := jsonschema.UnmarshalJSON(strings.NewReader(schemaJSON))
-	if err != nil {
-		return nil, err
-	}
-
-	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource(schemaResource, doc); err != nil {
-		return nil, err
-	}
-	return compiler.Compile(schemaResource)
 }
 
 func parseAndNormalizeJSON(output string) (any, string, error) {

@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.45.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/ollama/ollama v0.24.0
 	github.com/openai/openai-go v1.12.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
