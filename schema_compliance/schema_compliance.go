@@ -18,6 +18,10 @@ func Ensure(output string, schemaJSON string) (string, error) {
 		return "", &Error{Kind: ErrorKindInvalidSchema, Err: err}
 	}
 
+	if normalized, err := normalizeIfSchemaCompliant(output, schema); err == nil {
+		return normalized, nil
+	}
+
 	current := output
 	for _, fix := range oneTimeFixes() {
 		next, changed := fix(current)
@@ -41,14 +45,11 @@ func Ensure(output string, schemaJSON string) (string, error) {
 		}
 	}
 
-	value, normalized, err := parseAndNormalizeJSON(current)
-	if err != nil {
-		return "", &Error{Kind: ErrorKindInvalidJSON, Err: err}
+	normalized, err := normalizeIfSchemaCompliant(current, schema)
+	if err == nil {
+		return normalized, nil
 	}
-	if err := schema.Validate(value); err != nil {
-		return "", &Error{Kind: ErrorKindSchemaViolation, Err: err}
-	}
-	return normalized, nil
+	return "", err
 }
 
 type fixFunc func(string) (string, bool)
@@ -61,6 +62,36 @@ func oneTimeFixes() []fixFunc {
 
 func iterativeFixes() []fixFunc {
 	return nil
+}
+
+// ValidateJSON returns nil when output is syntactically valid JSON.
+func ValidateJSON(output string) error {
+	_, _, err := parseAndNormalizeJSON(output)
+	if err != nil {
+		return &Error{Kind: ErrorKindInvalidJSON, Err: err}
+	}
+	return nil
+}
+
+// ValidateAgainstSchema returns nil when output is valid JSON that conforms to schemaJSON.
+func ValidateAgainstSchema(output string, schemaJSON string) error {
+	schema, err := compileSchema(schemaJSON)
+	if err != nil {
+		return &Error{Kind: ErrorKindInvalidSchema, Err: err}
+	}
+	_, err = normalizeIfSchemaCompliant(output, schema)
+	return err
+}
+
+func normalizeIfSchemaCompliant(output string, schema *jsonschema.Schema) (string, error) {
+	value, normalized, err := parseAndNormalizeJSON(output)
+	if err != nil {
+		return "", &Error{Kind: ErrorKindInvalidJSON, Err: err}
+	}
+	if err := schema.Validate(value); err != nil {
+		return "", &Error{Kind: ErrorKindSchemaViolation, Err: err}
+	}
+	return normalized, nil
 }
 
 func compileSchema(schemaJSON string) (*jsonschema.Schema, error) {

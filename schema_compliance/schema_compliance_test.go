@@ -48,6 +48,42 @@ func TestEnsureExtractsFencedBlockFromArbitraryShortText(t *testing.T) {
 	}
 }
 
+func TestEnsureReturnsAlreadyCompliantJSONWithoutApplyingFixes(t *testing.T) {
+	const alreadyCompliant = "{\"name\":\"```json\"}"
+
+	got, err := schema_compliance.Ensure(alreadyCompliant, basicObjectSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != alreadyCompliant {
+		t.Fatalf("Ensure() = %q, want %q", got, alreadyCompliant)
+	}
+}
+
+func TestValidateJSONAcceptsValidJSON(t *testing.T) {
+	if err := schema_compliance.ValidateJSON(`{"name":"Ada"}`); err != nil {
+		t.Fatalf("ValidateJSON returned error: %v", err)
+	}
+}
+
+func TestValidateJSONRejectsInvalidJSON(t *testing.T) {
+	if err := schema_compliance.ValidateJSON(`{"name":`); err == nil {
+		t.Fatal("ValidateJSON returned nil error")
+	}
+}
+
+func TestValidateAgainstSchemaAcceptsCompliantJSON(t *testing.T) {
+	if err := schema_compliance.ValidateAgainstSchema(`{"name":"Ada"}`, basicObjectSchema); err != nil {
+		t.Fatalf("ValidateAgainstSchema returned error: %v", err)
+	}
+}
+
+func TestValidateAgainstSchemaRejectsNonCompliantJSON(t *testing.T) {
+	if err := schema_compliance.ValidateAgainstSchema(`{"name":42}`, basicObjectSchema); err == nil {
+		t.Fatal("ValidateAgainstSchema returned nil error")
+	}
+}
+
 func TestEnsureReturnsInvalidSchemaError(t *testing.T) {
 	_, err := schema_compliance.Ensure(`{"name":"Ada"}`, `{"type":`)
 	if err == nil {
