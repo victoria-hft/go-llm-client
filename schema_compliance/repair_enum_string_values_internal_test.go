@@ -24,6 +24,28 @@ func TestRepairEnumStringValuesMakesOneChangePerInvocation(t *testing.T) {
 	}
 }
 
+func TestRepairEnumStringValuesMakesOneExplanationChangePerInvocation(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["primary", "secondary"],
+	  "properties": {
+	    "primary": {"type": "string", "enum": ["positive", "neutral", "negative"]},
+	    "secondary": {"type": "string", "enum": ["positive", "neutral", "negative"]}
+	  },
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	got, changed := repairEnumStringValues(`{"primary":"Positive: customer is satisfied","secondary":"negative — customer is unhappy"}`, schema)
+	if !changed {
+		t.Fatal("repairEnumStringValues did not change input")
+	}
+	want := `{"primary":"positive","secondary":"negative — customer is unhappy"}`
+	if got != want {
+		t.Fatalf("repairEnumStringValues() = %q, want %q", got, want)
+	}
+}
+
 func TestRepairEnumStringValuesDeclinesAmbiguousNormalizedEnum(t *testing.T) {
 	const schemaJSON = `{
 	  "type": "object",

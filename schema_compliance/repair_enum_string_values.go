@@ -95,9 +95,59 @@ func enumStringValueCandidate(value string, schema *jsonschema.Schema) (string, 
 
 	matches := enumStringMatchesByNormalizedValue(schema.Enum.Values, normalizedValue)
 	if len(matches) != 1 || matches[0] == value {
-		return "", false
+		return enumExplanationStringValueCandidate(value, schema.Enum.Values)
 	}
 	return matches[0], true
+}
+
+func enumExplanationStringValueCandidate(value string, values []any) (string, bool) {
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedValue == "" {
+		return "", false
+	}
+
+	matches := map[string]bool{}
+	for _, segment := range enumExplanationBoundarySegments(trimmedValue) {
+		normalizedSegment := normalizeEnumString(segment)
+		if normalizedSegment == "" {
+			continue
+		}
+		for _, match := range enumStringMatchesByNormalizedValue(values, normalizedSegment) {
+			matches[match] = true
+		}
+	}
+	if len(matches) != 1 {
+		return "", false
+	}
+	for match := range matches {
+		if match == value {
+			return "", false
+		}
+		return match, true
+	}
+	return "", false
+}
+
+func enumExplanationBoundarySegments(value string) []string {
+	separators := []string{" — ", " – ", " -- ", " - ", ": ", ". ", "; ", ":", ".", ";"}
+
+	var segments []string
+	seen := map[string]bool{}
+	for _, separator := range separators {
+		before, after, ok := strings.Cut(value, separator)
+		if !ok {
+			continue
+		}
+		for _, segment := range []string{before, after} {
+			trimmed := strings.TrimSpace(segment)
+			if trimmed == "" || seen[trimmed] {
+				continue
+			}
+			seen[trimmed] = true
+			segments = append(segments, trimmed)
+		}
+	}
+	return segments
 }
 
 func enumStringMatchesByNormalizedValue(values []any, normalizedValue string) []string {

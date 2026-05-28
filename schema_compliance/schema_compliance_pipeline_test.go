@@ -326,6 +326,13 @@ func TestEnsureFullPipelineRepairsFencedRelaxedWrappedEnumOutput(t *testing.T) {
 	assertEnsurePipeline(t, input, statusEnumSchema, want)
 }
 
+func TestEnsureFullPipelineRepairsFencedRelaxedWrappedEnumExplanationOutput(t *testing.T) {
+	input := "Here is the value:\n```json\n{payload:{status:'In Progress: currently active'}}\n```"
+	want := `{"status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, statusEnumSchema, want)
+}
+
 func TestEnsureFullPipelineRepairsSmartQuotesAndNumericKeyArrayOutput(t *testing.T) {
 	input := "Here is the value:\n```json\n{payload:{“text”: “plain value”, tags: {\"0\": 'a', \"1\": 'b'}}}\n```"
 	want := `{"tags":["a","b"],"text":"plain value"}`
@@ -458,6 +465,107 @@ func TestEnsureFullPipelineRepairsNumericScalarsWithExistingStages(t *testing.T)
 	want := `{"metrics":{"count":1000,"limit":255,"rate":1e-6,"ratio":0.92,"spread":0.0025},"name":"Metrics","status":"in-progress"}`
 
 	assertEnsurePipeline(t, input, pipelineNumericMetricsSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsEnumExplanationWithScalarAndWrapperFixes(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["sentiment", "date", "score"],
+	  "properties": {
+	    "sentiment": {
+	      "type": "string",
+	      "enum": ["positive", "neutral", "negative"]
+	    },
+	    "date": {"type": "string", "format": "date"},
+	    "score": {"type": "number"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{answer:{sentiment:'Positive: customer is satisfied', date:'28 May 2026', score:'3/4'}}`
+	want := `{"date":"2026-05-28","score":0.75,"sentiment":"positive"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsEnumExplanationsInsideNumericKeyArrayItems(t *testing.T) {
+	input := `{result:{reviews:{"1":{sentiment:'Positive: customer is satisfied', score:'92%'}, "2":{sentiment:'negative — customer is unhappy', score:'25 bps'}}}}`
+	const boundedSchema = `{
+	  "type": "object",
+	  "required": ["reviews"],
+	  "properties": {
+	    "reviews": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["sentiment", "score"],
+	        "properties": {
+	          "sentiment": {
+	            "type": "string",
+	            "enum": ["positive", "neutral", "negative"]
+	          },
+	          "score": {"type": "number", "minimum": 0, "maximum": 1}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+	want := `{"reviews":[{"score":0.92,"sentiment":"positive"},{"score":0.0025,"sentiment":"negative"}]}`
+
+	assertEnsurePipeline(t, input, boundedSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsEnumExplanationWithItemItemsAndBooleanMarker(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["items"],
+	  "properties": {
+	    "items": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["sentiment", "active"],
+	        "properties": {
+	          "sentiment": {
+	            "type": "string",
+	            "enum": ["positive", "neutral", "negative"]
+	          },
+	          "active": {"type": "boolean"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "```json\n{item:{sentiment:'customer is satisfied — Positive', active:\"\\u2705\"}}\n```"
+	want := `{"items":[{"active":true,"sentiment":"positive"}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsEnumExplanationWithSmartQuotesAndKeyCleanup(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["sentiment", "note"],
+	  "properties": {
+	    "sentiment": {
+	      "type": "string",
+	      "enum": ["positive", "neutral", "negative"]
+	    },
+	    "note": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+	const zwsp = "\u200b"
+
+	input := "```json\n{“senti" + zwsp + "ment”: “POSITIVE. customer is satisfied”, note:'kept'}\n```"
+	want := `{"note":"kept","sentiment":"positive"}`
+
+	assertEnsurePipeline(t, input, schema, want)
 }
 
 func TestEnsureFullPipelineRepairsItemItemsShapeWithExistingStages(t *testing.T) {
@@ -829,6 +937,23 @@ func TestEnsureFullPipelineRejectsUnsafeMultiKeyResponseEnvelope(t *testing.T) {
 func TestEnsureFullPipelineRejectsZeroWidthKeyCollision(t *testing.T) {
 	_, err := schema_compliance.Ensure("```json\n{data:{name:'Ada',\"na\u200bme\":'Grace'}}\n```", basicObjectSchema)
 	assertSchemaViolationError(t, err)
+}
+
+func TestEnsureFullPipelineRejectsAmbiguousEnumExplanation(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["sentiment"],
+	  "properties": {
+	    "sentiment": {
+	      "type": "string",
+	      "enum": ["positive", "neutral", "negative"]
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	_, err := schema_compliance.Ensure("```json\n{payload:{sentiment:'positive — negative'}}\n```", schema)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
 }
 
 func TestEnsureFullPipelineRejectsNestedZeroWidthKeyCollision(t *testing.T) {
