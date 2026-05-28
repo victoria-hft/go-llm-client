@@ -75,6 +75,52 @@ func TestSchemaLossScoresSingleItemNearMissArrayWorseThanNearMissPayload(t *test
 	}
 }
 
+func TestSchemaLossScoresInvalidFormatHigherThanValidFormat(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["date"],
+	  "properties": {"date": {"type": "string", "format": "date"}},
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	invalidLoss := schemaLoss(`{"date":"28 May 2026"}`, schema)
+	validLoss := schemaLoss(`{"date":"2026-05-28"}`, schema)
+	if invalidLoss <= validLoss {
+		t.Fatalf("invalid loss = %d, valid loss = %d, want invalid > valid", invalidLoss, validLoss)
+	}
+}
+
+func TestSchemaLossUsesClosestOneOfBranch(t *testing.T) {
+	const schemaJSON = `{
+	  "oneOf": [
+	    {
+	      "type": "object",
+	      "required": ["date"],
+	      "properties": {"date": {"type": "string", "format": "date"}},
+	      "additionalProperties": false
+	    },
+	    {
+	      "type": "object",
+	      "required": ["count"],
+	      "properties": {"count": {"type": "integer"}},
+	      "additionalProperties": false
+	    }
+	  ]
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	stringLoss := schemaLoss(`{"count":"42"}`, schema)
+	numberLoss := schemaLoss(`{"count":42}`, schema)
+	unrelatedLoss := schemaLoss(`{"other":42}`, schema)
+	if stringLoss <= numberLoss {
+		t.Fatalf("string loss = %d, number loss = %d, want string > number", stringLoss, numberLoss)
+	}
+	if stringLoss >= unrelatedLoss {
+		t.Fatalf("string loss = %d, unrelated loss = %d, want string < unrelated", stringLoss, unrelatedLoss)
+	}
+}
+
 func mustCompileTestSchema(t *testing.T, schemaJSON string) *jsonschema.Schema {
 	t.Helper()
 	schema, err := compileSchema(schemaJSON)

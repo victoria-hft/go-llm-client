@@ -44,6 +44,7 @@ func compileSchemaUncached(schemaJSON string) (*jsonschema.Schema, error) {
 	}
 
 	compiler := jsonschema.NewCompiler()
+	compiler.AssertFormat()
 	if err := compiler.AddResource(schemaResource, doc); err != nil {
 		return nil, err
 	}

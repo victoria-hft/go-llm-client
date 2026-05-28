@@ -10,7 +10,7 @@ import (
 const (
 	invalidJSONLoss          = 1_000_000
 	validationFallbackLoss   = 1_000
-	typeMismatchLoss         = 100
+	typeMismatchLoss         = 30
 	missingRequiredFieldLoss = 40
 	unexpectedFieldLoss      = 20
 	wrapperContainerLoss     = 100
@@ -49,6 +49,9 @@ func valueLoss(value any, schema *jsonschema.Schema) int {
 	if schema.Enum != nil && !enumContains(schema.Enum.Values, value) {
 		loss += enumOrConstMismatchLoss
 	}
+	if schema.Format != nil && schema.Format.Validate(value) != nil {
+		loss += enumOrConstMismatchLoss
+	}
 
 	if object, ok := value.(map[string]any); ok {
 		loss += objectLoss(object, schema)
@@ -62,10 +65,42 @@ func valueLoss(value any, schema *jsonschema.Schema) int {
 		}
 	}
 
+	loss += compositionLoss(value, schema)
+
 	if hasUnsupportedSchemaFeatures(schema) {
 		loss += validationFallbackLoss
 	}
 	return loss
+}
+
+func compositionLoss(value any, schema *jsonschema.Schema) int {
+	loss := 0
+	if len(schema.AllOf) > 0 {
+		for _, branch := range schema.AllOf {
+			loss += valueLoss(value, branch)
+		}
+	}
+	if len(schema.AnyOf) > 0 {
+		loss += closestBranchLoss(value, schema.AnyOf)
+	}
+	if len(schema.OneOf) > 0 {
+		loss += closestBranchLoss(value, schema.OneOf)
+	}
+	return loss
+}
+
+func closestBranchLoss(value any, branches []*jsonschema.Schema) int {
+	if len(branches) == 0 {
+		return 0
+	}
+
+	best := validationFallbackLoss
+	for _, branch := range branches {
+		if loss := valueLoss(value, branch); loss < best {
+			best = loss
+		}
+	}
+	return best
 }
 
 func objectLoss(object map[string]any, schema *jsonschema.Schema) int {
@@ -103,14 +138,20 @@ func missingRequiredLoss(schema *jsonschema.Schema) int {
 }
 
 func arrayLoss(array []any, schema *jsonschema.Schema) int {
-	itemSchema, ok := schema.Items.(*jsonschema.Schema)
-	if !ok || itemSchema == nil {
+	itemSchemas := arrayItemSchemas(schema)
+	if len(itemSchemas) == 0 {
 		return 0
 	}
 
 	loss := 0
-	for _, item := range array {
-		loss += valueLoss(item, itemSchema)
+	for index, item := range array {
+		itemLoss := validationFallbackLoss
+		for _, itemSchema := range itemSchemasForIndex(itemSchemas, schema, index) {
+			if lossForSchema := valueLoss(item, itemSchema); lossForSchema < itemLoss {
+				itemLoss = lossForSchema
+			}
+		}
+		loss += itemLoss
 	}
 	return loss
 }
@@ -207,10 +248,7 @@ func isContainer(value any) bool {
 }
 
 func hasUnsupportedSchemaFeatures(schema *jsonschema.Schema) bool {
-	return len(schema.AllOf) > 0 ||
-		len(schema.AnyOf) > 0 ||
-		len(schema.OneOf) > 0 ||
-		schema.Not != nil ||
+	return schema.Not != nil ||
 		schema.If != nil ||
 		schema.Then != nil ||
 		schema.Else != nil
