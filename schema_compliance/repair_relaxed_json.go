@@ -67,6 +67,9 @@ func (p *relaxedJSONParser) parseValue() (any, bool) {
 		return p.parseSingleQuotedString()
 	default:
 		if p.peek() == '-' || isDigit(p.peek()) {
+			if value, ok := p.parseHexIntegerLiteralString(); ok {
+				return value, true
+			}
 			return p.parseNumber()
 		}
 		return p.parseBareValue()
@@ -272,6 +275,27 @@ func (p *relaxedJSONParser) parseNumber() (any, bool) {
 	return json.Number(number), true
 }
 
+func (p *relaxedJSONParser) parseHexIntegerLiteralString() (string, bool) {
+	start := p.pos
+	if !p.done() && p.peek() == '-' {
+		p.pos++
+	}
+	if p.pos+2 > len(p.input) || p.input[p.pos] != '0' || (p.input[p.pos+1] != 'x' && p.input[p.pos+1] != 'X') {
+		p.pos = start
+		return "", false
+	}
+	p.pos += 2
+	digitStart := p.pos
+	for !p.done() && isHexDigit(p.peek()) {
+		p.pos++
+	}
+	if p.pos == digitStart {
+		p.pos = start
+		return "", false
+	}
+	return p.input[start:p.pos], true
+}
+
 func (p *relaxedJSONParser) parseBareValue() (any, bool) {
 	value, ok := p.parseIdentifier()
 	if !ok {
@@ -346,4 +370,8 @@ func isDigit(ch byte) bool {
 
 func isDigitOneToNine(ch byte) bool {
 	return '1' <= ch && ch <= '9'
+}
+
+func isHexDigit(ch byte) bool {
+	return isDigit(ch) || ('a' <= ch && ch <= 'f') || ('A' <= ch && ch <= 'F')
 }

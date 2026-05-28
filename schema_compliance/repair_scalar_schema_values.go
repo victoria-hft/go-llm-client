@@ -2,6 +2,7 @@ package schema_compliance
 
 import (
 	"encoding/json"
+	"math/big"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +13,14 @@ import (
 
 var numericDatePattern = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})/(\d{4})$`)
 var simpleDurationPattern = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)\s+([A-Za-z]+)$`)
+var commaSeparatedNumberPattern = regexp.MustCompile(`^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$`)
+var underscoreSeparatedNumberPattern = regexp.MustCompile(`^[+-]?\d{1,3}(_\d{3})+(\.\d+)?$`)
+var spaceSeparatedNumberPattern = regexp.MustCompile(`^[+-]?\d{1,3}( \d{3})+(\.\d+)?$`)
+var hexIntegerPattern = regexp.MustCompile(`^[+-]?0[xX][0-9a-fA-F]+$`)
+var bigIntPattern = regexp.MustCompile(`^[+-]?\d+n$`)
+var fractionPattern = regexp.MustCompile(`^[+-]?\d+/[+-]?\d+$`)
+var percentPattern = regexp.MustCompile(`^[+-]?\d+(?:\.\d+)?%$`)
+var basisPointsPattern = regexp.MustCompile(`^([+-]?\d+(?:\.\d+)?)\s*(?i:bps)$`)
 
 const (
 	maxEpochSeconds = 32503680000
@@ -136,11 +145,32 @@ func scalarSchemaValueCandidate(value string, schema *jsonschema.Schema) (any, b
 		}
 	}
 	if schemaAllowsType(schema, "integer") {
+		if number, ok := parseHexIntegerString(value); ok {
+			return number, true
+		}
+		if number, ok := parseBigIntString(value); ok {
+			return number, true
+		}
+		if number, ok := parseSeparatedIntegerString(value); ok {
+			return number, true
+		}
 		if number, ok := parseIntegerString(value); ok {
 			return number, true
 		}
 	}
 	if schemaAllowsType(schema, "number") {
+		if number, ok := parseSeparatedNumberString(value); ok {
+			return number, true
+		}
+		if number, ok := parseFractionNumberString(value); ok {
+			return number, true
+		}
+		if number, ok := parsePercentString(value, schema); ok {
+			return number, true
+		}
+		if number, ok := parseBasisPointsString(value, schema); ok {
+			return number, true
+		}
 		if number, ok := parseNumberString(value); ok {
 			return number, true
 		}
@@ -352,6 +382,208 @@ func parseIntegerString(value string) (json.Number, bool) {
 		return "", false
 	}
 	return json.Number(trimmed), true
+}
+
+func parseSeparatedIntegerString(value string) (json.Number, bool) {
+	number, ok := parseSeparatedNumberString(value)
+	if !ok || strings.Contains(number.String(), ".") {
+		return "", false
+	}
+	if _, err := strconv.ParseInt(number.String(), 10, 64); err != nil {
+		return "", false
+	}
+	return number, true
+}
+
+func parseSeparatedNumberString(value string) (json.Number, bool) {
+	trimmed := strings.TrimSpace(value)
+	var cleaned string
+	switch {
+	case commaSeparatedNumberPattern.MatchString(trimmed):
+		cleaned = strings.ReplaceAll(trimmed, ",", "")
+	case underscoreSeparatedNumberPattern.MatchString(trimmed):
+		cleaned = strings.ReplaceAll(trimmed, "_", "")
+	case spaceSeparatedNumberPattern.MatchString(trimmed):
+		cleaned = strings.ReplaceAll(trimmed, " ", "")
+	default:
+		return "", false
+	}
+	if !json.Valid([]byte(cleaned)) {
+		return "", false
+	}
+	if _, err := strconv.ParseFloat(cleaned, 64); err != nil {
+		return "", false
+	}
+	return json.Number(cleaned), true
+}
+
+func parseHexIntegerString(value string) (json.Number, bool) {
+	trimmed := strings.TrimSpace(value)
+	if !hexIntegerPattern.MatchString(trimmed) {
+		return "", false
+	}
+
+	sign := ""
+	digits := trimmed
+	if strings.HasPrefix(digits, "+") || strings.HasPrefix(digits, "-") {
+		sign = digits[:1]
+		digits = digits[1:]
+	}
+
+	parsed, ok := new(big.Int).SetString(digits[2:], 16)
+	if !ok {
+		return "", false
+	}
+	if sign == "-" {
+		parsed.Neg(parsed)
+	}
+	if !parsed.IsInt64() {
+		return "", false
+	}
+	return json.Number(strconv.FormatInt(parsed.Int64(), 10)), true
+}
+
+func parseBigIntString(value string) (json.Number, bool) {
+	trimmed := strings.TrimSpace(value)
+	if !bigIntPattern.MatchString(trimmed) {
+		return "", false
+	}
+	digits := strings.TrimSuffix(trimmed, "n")
+	parsed, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return "", false
+	}
+	return json.Number(strconv.FormatInt(parsed, 10)), true
+}
+
+func parseFractionNumberString(value string) (json.Number, bool) {
+	trimmed := strings.TrimSpace(value)
+	if !fractionPattern.MatchString(trimmed) {
+		return "", false
+	}
+
+	parts := strings.Split(trimmed, "/")
+	numerator, ok := new(big.Rat).SetString(parts[0])
+	if !ok {
+		return "", false
+	}
+	denominator, ok := new(big.Rat).SetString(parts[1])
+	if !ok || denominator.Sign() == 0 {
+		return "", false
+	}
+
+	result := new(big.Rat).Quo(numerator, denominator)
+	return json.Number(ratToJSONNumber(result)), true
+}
+
+func parsePercentString(value string, schema *jsonschema.Schema) (json.Number, bool) {
+	trimmed := strings.TrimSpace(value)
+	if !percentPattern.MatchString(trimmed) {
+		return "", false
+	}
+	numberText := strings.TrimSuffix(trimmed, "%")
+	scale, ok := rateScaleForSchema(schema)
+	if !ok {
+		return "", false
+	}
+
+	valueRat, ok := new(big.Rat).SetString(numberText)
+	if !ok {
+		return "", false
+	}
+	result := new(big.Rat).Quo(valueRat, scale)
+	return json.Number(ratToJSONNumber(result)), true
+}
+
+func parseBasisPointsString(value string, schema *jsonschema.Schema) (json.Number, bool) {
+	matches := basisPointsPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if matches == nil {
+		return "", false
+	}
+	scale, ok := rateScaleForSchema(schema)
+	if !ok {
+		return "", false
+	}
+
+	valueRat, ok := new(big.Rat).SetString(matches[1])
+	if !ok {
+		return "", false
+	}
+	result := new(big.Rat).Quo(valueRat, new(big.Rat).Mul(scale, big.NewRat(100, 1)))
+	return json.Number(ratToJSONNumber(result)), true
+}
+
+func rateScaleForSchema(schema *jsonschema.Schema) (*big.Rat, bool) {
+	schema = resolveSchemaRef(schema)
+	if schema == nil {
+		return nil, false
+	}
+
+	if schemaMinimumAllows(schema, 0) && schemaMaximumAtMost(schema, 1) {
+		return big.NewRat(100, 1), true
+	}
+	if schemaMinimumAllows(schema, 0) && schemaMaximumGreaterThan(schema, 1) && schemaMaximumAtMost(schema, 100) {
+		return big.NewRat(1, 1), true
+	}
+	return nil, false
+}
+
+func schemaMinimumAllows(schema *jsonschema.Schema, value int64) bool {
+	target := big.NewRat(value, 1)
+	if schema.Minimum != nil {
+		return schema.Minimum.Cmp(target) <= 0
+	}
+	if schema.ExclusiveMinimum != nil {
+		return schema.ExclusiveMinimum.Cmp(target) < 0
+	}
+	return false
+}
+
+func schemaMaximumAllows(schema *jsonschema.Schema, value int64) bool {
+	target := big.NewRat(value, 1)
+	if schema.Maximum != nil {
+		return schema.Maximum.Cmp(target) >= 0
+	}
+	if schema.ExclusiveMaximum != nil {
+		return schema.ExclusiveMaximum.Cmp(target) > 0
+	}
+	return false
+}
+
+func schemaMaximumAtMost(schema *jsonschema.Schema, value int64) bool {
+	target := big.NewRat(value, 1)
+	if schema.Maximum != nil {
+		return schema.Maximum.Cmp(target) <= 0
+	}
+	if schema.ExclusiveMaximum != nil {
+		return schema.ExclusiveMaximum.Cmp(target) <= 0
+	}
+	return false
+}
+
+func schemaMaximumGreaterThan(schema *jsonschema.Schema, value int64) bool {
+	target := big.NewRat(value, 1)
+	if schema.Maximum != nil {
+		return schema.Maximum.Cmp(target) > 0
+	}
+	if schema.ExclusiveMaximum != nil {
+		return schema.ExclusiveMaximum.Cmp(target) > 0
+	}
+	return false
+}
+
+func ratToJSONNumber(value *big.Rat) string {
+	if value.IsInt() {
+		return value.Num().String()
+	}
+
+	output := value.FloatString(16)
+	output = strings.TrimRight(output, "0")
+	output = strings.TrimRight(output, ".")
+	if output == "-0" {
+		return "0"
+	}
+	return output
 }
 
 func parseNumberString(value string) (json.Number, bool) {

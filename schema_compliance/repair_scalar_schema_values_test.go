@@ -42,6 +42,42 @@ const isoDurationSchema = `{
   "additionalProperties": false
 }`
 
+const integerValueSchema = `{
+  "type": "object",
+  "required": ["value"],
+  "properties": {
+    "value": {"type": "integer"}
+  },
+  "additionalProperties": false
+}`
+
+const numberValueSchema = `{
+  "type": "object",
+  "required": ["value"],
+  "properties": {
+    "value": {"type": "number"}
+  },
+  "additionalProperties": false
+}`
+
+const probabilityValueSchema = `{
+  "type": "object",
+  "required": ["value"],
+  "properties": {
+    "value": {"type": "number", "minimum": 0, "maximum": 1}
+  },
+  "additionalProperties": false
+}`
+
+const percentValueSchema = `{
+  "type": "object",
+  "required": ["value"],
+  "properties": {
+    "value": {"type": "number", "minimum": 0, "maximum": 100}
+  },
+  "additionalProperties": false
+}`
+
 func TestEnsureRepairsHumanDateToISODate(t *testing.T) {
 	got, err := schema_compliance.Ensure(`{"date":"28 May 2026"}`, isoDateSchema)
 	if err != nil {
@@ -280,6 +316,133 @@ func TestEnsureRepairsNumberString(t *testing.T) {
 	}
 	if got != `{"score":42.5}` {
 		t.Fatalf("Ensure() = %q, want %q", got, `{"score":42.5}`)
+	}
+}
+
+func TestEnsureRepairsNumericSeparatorStrings(t *testing.T) {
+	tests := map[string]string{
+		"1_000":    "1000",
+		"1,000":    "1000",
+		"1 000":    "1000",
+		"1,000.25": "1000.25",
+		"1_000.25": "1000.25",
+	}
+
+	for input, wantValue := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"value":"`+input+`"}`, numberValueSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"value":` + wantValue + `}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsScientificNotationStringForNumber(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"value":"1e-6"}`, numberValueSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"value":1e-6}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"value":1e-6}`)
+	}
+}
+
+func TestEnsureRepairsHexIntegerLiterals(t *testing.T) {
+	tests := map[string]string{
+		`"0xFF"`:  "255",
+		`0xFF`:    "255",
+		`"-0x10"`: "-16",
+	}
+
+	for input, wantValue := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"value":`+input+`}`, integerValueSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"value":` + wantValue + `}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsBigIntSuffixStringForInteger(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"value":"123n"}`, integerValueSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"value":123}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"value":123}`)
+	}
+}
+
+func TestEnsureRepairsFractionStringForNumber(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"value":"3/4"}`, numberValueSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"value":0.75}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"value":0.75}`)
+	}
+}
+
+func TestEnsureRepairsPercentAndBasisPointStringsUsingSchemaBounds(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		schema string
+		want   string
+	}{
+		{name: "percent probability", input: "92%", schema: probabilityValueSchema, want: `{"value":0.92}`},
+		{name: "percent 0 to 100", input: "92%", schema: percentValueSchema, want: `{"value":92}`},
+		{name: "bps probability", input: "25 bps", schema: probabilityValueSchema, want: `{"value":0.0025}`},
+		{name: "bps 0 to 100", input: "25 bps", schema: percentValueSchema, want: `{"value":0.25}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"value":"`+tt.input+`"}`, tt.schema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("Ensure() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnsureRejectsUnsafeNumericRepairs(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		schema string
+	}{
+		{name: "comma decimal", input: `"1,25"`, schema: numberValueSchema},
+		{name: "bad grouping", input: `"10,00"`, schema: numberValueSchema},
+		{name: "mixed separators", input: `"1,000_000"`, schema: numberValueSchema},
+		{name: "scientific integer", input: `"1e6"`, schema: integerValueSchema},
+		{name: "hex number", input: `"0xFF"`, schema: numberValueSchema},
+		{name: "hex overflow", input: `"0x8000000000000000"`, schema: integerValueSchema},
+		{name: "bigint overflow", input: `"9223372036854775808n"`, schema: integerValueSchema},
+		{name: "zero denominator", input: `"3/0"`, schema: numberValueSchema},
+		{name: "percent without bounds", input: `"92%"`, schema: numberValueSchema},
+		{name: "bps without bounds", input: `"25 bps"`, schema: numberValueSchema},
+		{name: "out of range percent probability", input: `"250%"`, schema: probabilityValueSchema},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := schema_compliance.Ensure(`{"value":`+tt.input+`}`, tt.schema)
+			assertSchemaViolationError(t, err)
+		})
 	}
 }
 

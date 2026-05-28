@@ -89,6 +89,45 @@ func TestRepairScalarSchemaValuesDoesNotRepairDurationWithoutFormat(t *testing.T
 	}
 }
 
+func TestRepairScalarSchemaValuesMakesOneNumericChangePerInvocation(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["first", "second"],
+	  "properties": {
+	    "first": {"type": "number"},
+	    "second": {"type": "number"}
+	  },
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	got, changed := repairScalarSchemaValues(`{"first":"1_000","second":"3/4"}`, schema)
+	if !changed {
+		t.Fatal("repairScalarSchemaValues did not change input")
+	}
+	want := `{"first":1000,"second":"3/4"}`
+	if got != want {
+		t.Fatalf("repairScalarSchemaValues() = %q, want %q", got, want)
+	}
+}
+
+func TestRepairScalarSchemaValuesDoesNotRepairPercentWithoutBounds(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["value"],
+	  "properties": {
+	    "value": {"type": "number"}
+	  },
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	_, changed := repairScalarSchemaValues(`{"value":"92%"}`, schema)
+	if changed {
+		t.Fatal("repairScalarSchemaValues repaired percent without schema bounds")
+	}
+}
+
 const basicObjectSchemaForInternalScalarTests = `{
   "type": "object",
   "required": ["name"],

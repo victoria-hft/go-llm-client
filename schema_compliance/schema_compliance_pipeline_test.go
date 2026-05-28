@@ -215,6 +215,31 @@ const pipelineTimedJobSchema = `{
   "additionalProperties": false
 }`
 
+const pipelineNumericMetricsSchema = `{
+  "type": "object",
+  "required": ["name", "metrics", "status"],
+  "properties": {
+    "name": {"type": "string"},
+    "metrics": {
+      "type": "object",
+      "required": ["count", "ratio", "rate", "spread", "limit"],
+      "properties": {
+        "count": {"type": "integer"},
+        "ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "rate": {"type": "number"},
+        "spread": {"type": "number", "minimum": 0, "maximum": 1},
+        "limit": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "string",
+      "enum": ["in-progress", "done"]
+    }
+  },
+  "additionalProperties": false
+}`
+
 func TestEnsureFullPipelineRepairsTransportJunkFencedRelaxedWrappedNestedScalarOutput(t *testing.T) {
 	const zwsp = "\u200b"
 
@@ -412,6 +437,27 @@ func TestEnsureFullPipelineRepairsNestedTimeScalarsAfterKeyValueObjectConversion
 	want := `{"jobs":[{"duration":"PT2H","metadata":{"owner":"Ada"},"timestamp":"2026-05-28T13:45:00Z"}]}`
 
 	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNumericScalarsWithExistingStages(t *testing.T) {
+	input := "Here is the value:\n```json\n" +
+		`{
+		  payload: {
+		    name: 'Metrics',
+		    status: 'IN_PROGRESS',
+		    metrics: {
+		      count: '1_000',
+		      ratio: '92%',
+		      rate: '1e-6',
+		      spread: '25 bps',
+		      limit: 0xFF
+		    }
+		  }
+		}` +
+		"\n```"
+	want := `{"metrics":{"count":1000,"limit":255,"rate":1e-6,"ratio":0.92,"spread":0.0025},"name":"Metrics","status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, pipelineNumericMetricsSchema, want)
 }
 
 func TestEnsureFullPipelineRepairsKeyValueMapThenEnumAndDateScalars(t *testing.T) {
