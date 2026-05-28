@@ -78,6 +78,15 @@ const percentValueSchema = `{
   "additionalProperties": false
 }`
 
+const booleanValueSchema = `{
+  "type": "object",
+  "required": ["value"],
+  "properties": {
+    "value": {"type": "boolean"}
+  },
+  "additionalProperties": false
+}`
+
 func TestEnsureRepairsHumanDateToISODate(t *testing.T) {
 	got, err := schema_compliance.Ensure(`{"date":"28 May 2026"}`, isoDateSchema)
 	if err != nil {
@@ -456,6 +465,74 @@ func TestEnsureDoesNotRepairFloatStringForIntegerSchema(t *testing.T) {
 
 	_, err := schema_compliance.Ensure(`{"count":"42.5"}`, schema)
 	assertSchemaViolationError(t, err)
+}
+
+func TestEnsureRepairsBooleanMarkerStrings(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "check mark", input: `"\u2713"`, want: `{"value":true}`},
+		{name: "ballot x", input: `"\u2717"`, want: `{"value":false}`},
+		{name: "white check mark", input: `"\u2705"`, want: `{"value":true}`},
+		{name: "cross mark", input: `"\u274c"`, want: `{"value":false}`},
+		{name: "heavy check mark", input: `"\u2714"`, want: `{"value":true}`},
+		{name: "heavy ballot x", input: `"\u2718"`, want: `{"value":false}`},
+		{name: "ballot box checked", input: `"\u2611"`, want: `{"value":true}`},
+		{name: "ballot box x", input: `"\u2612"`, want: `{"value":false}`},
+		{name: "yes", input: `" YES "`, want: `{"value":true}`},
+		{name: "no", input: `" no "`, want: `{"value":false}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"value":`+tt.input+`}`, booleanValueSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("Ensure() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsBooleanMarkerUsingOneOfBranch(t *testing.T) {
+	const schema = `{
+	  "oneOf": [
+	    {
+	      "type": "object",
+	      "required": ["value"],
+	      "properties": {"value": {"type": "boolean"}},
+	      "additionalProperties": false
+	    },
+	    {
+	      "type": "object",
+	      "required": ["name"],
+	      "properties": {"name": {"type": "string"}},
+	      "additionalProperties": false
+	    }
+	  ]
+	}`
+
+	got, err := schema_compliance.Ensure(`{"value":"\u2705"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"value":true}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"value":true}`)
+	}
+}
+
+func TestEnsureDoesNotRepairBooleanMarkerForStringSchema(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"name":"\u2705"}`, basicObjectSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"name":"\u2705"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"name":"\u2705"}`)
+	}
 }
 
 func TestEnsureRepairsPlaceholderStringsToNull(t *testing.T) {

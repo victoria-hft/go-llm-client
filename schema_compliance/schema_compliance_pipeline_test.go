@@ -639,6 +639,38 @@ func TestEnsureFullPipelineRepairsItemsArrayToItemAfterNumericKeyArrayAndTimeSca
 	assertEnsurePipeline(t, input, schema, want)
 }
 
+func TestEnsureFullPipelineRepairsBooleanMarkersWithItemItemsAndScalars(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["status", "items"],
+	  "properties": {
+	    "status": {
+	      "type": "string",
+	      "enum": ["in-progress", "done"]
+	    },
+	    "items": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["active", "score", "date"],
+	        "properties": {
+	          "active": {"type": "boolean"},
+	          "score": {"type": "number"},
+	          "date": {"type": "string", "format": "date"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "\ufeffHere is the value:\n```json\n{payload:{status:'IN_PROGRESS', item:{active:\"\\u2705\", score:'1_000', date:'28 May 2026'}}}\n```"
+	want := `{"items":[{"active":true,"date":"2026-05-28","score":1000}],"status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
 func TestEnsureFullPipelineRepairsKeyValueMapThenEnumAndDateScalars(t *testing.T) {
 	const schema = `{
 	  "type": "object",

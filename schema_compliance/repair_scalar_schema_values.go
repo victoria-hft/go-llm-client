@@ -123,6 +123,11 @@ func scalarSchemaValueCandidate(value string, schema *jsonschema.Schema) (any, b
 	if schemaAllowsType(schema, "null") && isPlaceholderString(value) {
 		return nil, true
 	}
+	if schemaAllowsType(schema, "boolean") {
+		if booleanValue, ok := parseBooleanMarkerString(value); ok {
+			return booleanValue, true
+		}
+	}
 	if schemaExpectsISODate(schema) {
 		if isoDate, ok := parseEpochDate(value); ok {
 			return isoDate, true
@@ -606,6 +611,17 @@ func isPlaceholderString(value string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func parseBooleanMarkerString(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "yes", "y", "✓", "✔", "☑", "✅":
+		return true, true
+	case "false", "no", "n", "✗", "✘", "✕", "×", "☒", "❌":
+		return false, true
+	default:
+		return false, false
 	}
 }
 
