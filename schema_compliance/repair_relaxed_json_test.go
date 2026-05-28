@@ -68,6 +68,116 @@ func TestEnsureRepairsRelaxedJSONBareIdentifierValue(t *testing.T) {
 	}
 }
 
+func TestEnsureRepairsRelaxedJSONUndefinedValueToNull(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x"],
+	  "properties": {
+	    "x": {"type": ["number", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"x": undefined}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"x":null}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"x":null}`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONUndefinedValueWithUnquotedKey(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x"],
+	  "properties": {
+	    "x": {"type": ["string", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{x: undefined}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"x":null}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"x":null}`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONUndefinedNestedAndArrayValues(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["items", "profile"],
+	  "properties": {
+	    "items": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["value"],
+	        "properties": {
+	          "value": {"type": ["string", "null"]}
+	        },
+	        "additionalProperties": false
+	      }
+	    },
+	    "profile": {
+	      "type": "object",
+	      "required": ["value"],
+	      "properties": {
+	        "value": {"type": ["string", "null"]}
+	      },
+	      "additionalProperties": false
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{items:[{value: undefined}], profile:{value: undefined}}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	want := `{"items":[{"value":null}],"profile":{"value":null}}`
+	if got != want {
+		t.Fatalf("Ensure() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureKeepsQuotedUndefinedString(t *testing.T) {
+	got, err := schema_compliance.Ensure(`{"name":"undefined"}`, basicObjectSchema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"name":"undefined"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"name":"undefined"}`)
+	}
+}
+
+func TestEnsureKeepsUndefinedObjectKey(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["undefined"],
+	  "properties": {
+	    "undefined": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{undefined: "value"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"undefined":"value"}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"undefined":"value"}`)
+	}
+}
+
+func TestEnsureReturnsSchemaViolationForUndefinedWhenNullNotAllowed(t *testing.T) {
+	_, err := schema_compliance.Ensure(`{name: undefined}`, basicObjectSchema)
+	assertSchemaViolationError(t, err)
+}
+
 func TestEnsureRepairsRelaxedJSONNestedValuesAndTrailingCommas(t *testing.T) {
 	got, err := schema_compliance.Ensure(`{name: 'Ada', tags: ['math', research,], profile: {active: true,},}`, nestedObjectSchema)
 	if err != nil {

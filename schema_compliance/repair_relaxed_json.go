@@ -309,6 +309,8 @@ func (p *relaxedJSONParser) parseBareValue() (any, bool) {
 		return false, true
 	case "null":
 		return nil, true
+	case "undefined":
+		return nil, true
 	default:
 		return value, true
 	}

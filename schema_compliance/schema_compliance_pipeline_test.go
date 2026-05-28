@@ -719,6 +719,64 @@ func TestEnsureFullPipelineRejectsNDJSONWhenOneItemCannotBecomeCompliant(t *test
 	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
 }
 
+func TestEnsureFullPipelineRepairsFencedRelaxedUndefinedOutput(t *testing.T) {
+	input := "Here is the value:\n```json\n{name:'Ada',event:{date:'28 May 2026',city:'Paris',country:'France'},score:'42.5',status:undefined,tags:['research']}\n```"
+	want := `{"event":{"date":"2026-05-28","location":{"city":"Paris","country":"France"}},"name":"Ada","score":42.5,"status":null,"tags":["research"]}`
+
+	assertEnsurePipeline(t, input, pipelineProfileSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsWrappedUndefinedWithScalarAndEnumOutput(t *testing.T) {
+	input := `{answer:{city:'Paris',country:'France',date:'28 May 2026',count:'7',status:undefined}}`
+	want := `{"city":"Paris","count":7,"country":"France","date":"2026-05-28","status":null}`
+
+	assertEnsurePipeline(t, input, pipelineFlatEventSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsUndefinedAfterZeroWidthKeyCleanup(t *testing.T) {
+	const zwsp = "\u200b"
+
+	input := `{"na` + zwsp + `me":"Ada","event":{"date":"2026/05/28","city":"Paris","country":"France"},"score":"42","status":undefined,"tags":["research"]}`
+	want := `{"event":{"date":"2026-05-28","location":{"city":"Paris","country":"France"}},"name":"Ada","score":42,"status":null,"tags":["research"]}`
+
+	assertEnsurePipeline(t, input, pipelineProfileSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsUndefinedWithItemItemsAndNesting(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["items", "event", "status"],
+	  "properties": {
+	    "items": {
+	      "type": "array",
+	      "items": {"type": "string"}
+	    },
+	    "event": {
+	      "type": "object",
+	      "required": ["location"],
+	      "properties": {
+	        "location": {
+	          "type": "object",
+	          "required": ["city", "country"],
+	          "properties": {
+	            "city": {"type": "string"},
+	            "country": {"type": "string"}
+	          },
+	          "additionalProperties": false
+	        }
+	      },
+	      "additionalProperties": false
+	    },
+	    "status": {"type": ["string", "null"], "enum": ["ready", null]}
+	  },
+	  "additionalProperties": false
+	}`
+	input := `{item:'alpha',event:{city:'Paris',country:'France'},status:undefined}`
+	want := `{"event":{"location":{"city":"Paris","country":"France"}},"items":["alpha"],"status":null}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
 func TestEnsureFullPipelineRepairsEnumExplanationWithScalarAndWrapperFixes(t *testing.T) {
 	const schema = `{
 	  "type": "object",
