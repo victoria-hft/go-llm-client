@@ -860,6 +860,109 @@ func TestEnsureFullPipelineRepairsFencedBareArrayWithEnumAndScalarFixes(t *testi
 	assertEnsurePipeline(t, input, schema, want)
 }
 
+func TestEnsureFullPipelineRepairsFencedWrappedEnumArrayStringWithScalarFixes(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["tags", "status", "score"],
+	  "properties": {
+	    "tags": {
+	      "type": "array",
+	      "items": {"type": "string", "enum": ["risk", "pricing", "legal"]}
+	    },
+	    "status": {"type": "string", "enum": ["in-progress", "done"]},
+	    "score": {"type": "number"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "Here is the value:\n```json\n{payload:{tags:'risk, pricing', status:'IN_PROGRESS', score:'3/4'}}\n```"
+	want := `{"score":0.75,"status":"in-progress","tags":["risk","pricing"]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsEnumArrayStringAfterZeroWidthKeyCleanup(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["tags"],
+	  "properties": {
+	    "tags": {
+	      "type": "array",
+	      "items": {"type": "string", "enum": ["risk", "pricing", "legal"]}
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+	const zwsp = "\u200b"
+
+	input := `{"ta` + zwsp + `gs":"risk,pricing"}`
+	want := `{"tags":["risk","pricing"]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsEnumArrayStringWithItemItemsAndNesting(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["items", "event"],
+	  "properties": {
+	    "items": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["tags"],
+	        "properties": {
+	          "tags": {
+	            "type": "array",
+	            "items": {"type": "string", "enum": ["risk", "pricing", "legal"]}
+	          }
+	        },
+	        "additionalProperties": false
+	      }
+	    },
+	    "event": {
+	      "type": "object",
+	      "required": ["location"],
+	      "properties": {
+	        "location": {
+	          "type": "object",
+	          "required": ["city", "country"],
+	          "properties": {
+	            "city": {"type": "string"},
+	            "country": {"type": "string"}
+	          },
+	          "additionalProperties": false
+	        }
+	      },
+	      "additionalProperties": false
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{item:{tags:'risk,pricing'},event:{city:'Paris',country:'France'}}`
+	want := `{"event":{"location":{"city":"Paris","country":"France"}},"items":[{"tags":["risk","pricing"]}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRejectsEnumArrayStringWithUnknownToken(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["tags"],
+	  "properties": {
+	    "tags": {
+	      "type": "array",
+	      "items": {"type": "string", "enum": ["risk", "pricing", "legal"]}
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	_, err := schema_compliance.Ensure("```json\n{payload:{tags:'risk,unknown'}}\n```", schema)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
+}
+
 func TestEnsureFullPipelineRepairsWrappedBareArrayOutput(t *testing.T) {
 	input := `{answer:{text:'case',tags:[risk, pricing]}}`
 	want := `{"tags":["risk","pricing"],"text":"case"}`
