@@ -65,17 +65,15 @@ func enumerateFieldNestingCandidates(value any, schema *jsonschema.Schema, yield
 
 	if array, ok := value.([]any); ok {
 		for _, branch := range branches {
-			itemSchema, ok := branch.Items.(*jsonschema.Schema)
-			if !ok || itemSchema == nil {
-				continue
-			}
 			for index, item := range array {
-				if enumerateFieldNestingCandidates(item, itemSchema, func(candidateItem any) bool {
-					candidate := cloneJSONArray(array)
-					candidate[index] = candidateItem
-					return yield(candidate)
-				}) {
-					return true
+				for _, itemSchema := range itemSchemasForIndex(arrayItemSchemas(branch), branch, index) {
+					if enumerateFieldNestingCandidates(item, itemSchema, func(candidateItem any) bool {
+						candidate := cloneJSONArray(array)
+						candidate[index] = candidateItem
+						return yield(candidate)
+					}) {
+						return true
+					}
 				}
 			}
 		}
