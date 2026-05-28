@@ -460,6 +460,185 @@ func TestEnsureFullPipelineRepairsNumericScalarsWithExistingStages(t *testing.T)
 	assertEnsurePipeline(t, input, pipelineNumericMetricsSchema, want)
 }
 
+func TestEnsureFullPipelineRepairsItemItemsShapeWithExistingStages(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["status", "collections"],
+	  "properties": {
+	    "status": {
+	      "type": "string",
+	      "enum": ["in-progress", "done"]
+	    },
+	    "collections": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["items", "score"],
+	        "properties": {
+	          "items": {
+	            "type": "array",
+	            "items": {"type": "string"}
+	          },
+	          "score": {"type": "number"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "Here is the value:\n```json\n{payload:{status:'IN_PROGRESS', collections:{\"0\":{item:'Ada', score:'1_000'}}}}\n```"
+	want := `{"collections":[{"items":["Ada"],"score":1000}],"status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNullItemToItemsWithFencedRelaxedAndEnum(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["status", "items"],
+	  "properties": {
+	    "status": {
+	      "type": "string",
+	      "enum": ["in-progress", "done"]
+	    },
+	    "items": {
+	      "type": "array",
+	      "items": {"type": "string"}
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "\ufeffHere is the value:\n```json\n{answer:{status:'IN_PROGRESS', item:null,}}\n```"
+	want := `{"items":[],"status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsEmptyItemsToNullableItemWithSmartQuotesAndWrapper(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["status", "item"],
+	  "properties": {
+	    "status": {
+	      "type": "string",
+	      "enum": ["ready", "done"]
+	    },
+	    "item": {"type": ["string", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "```json\n{payload:{“status”: “READY”, “items”: [],}}\n```"
+	want := `{"item":null,"status":"ready"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsObjectItemsToItemWithNestedScalarFixes(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["item"],
+	  "properties": {
+	    "item": {
+	      "type": "object",
+	      "required": ["date", "score", "status"],
+	      "properties": {
+	        "date": {"type": "string", "format": "date"},
+	        "score": {"type": "number"},
+	        "status": {
+	          "type": "string",
+	          "enum": ["in-progress", "done"]
+	        }
+	      },
+	      "additionalProperties": false
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{items:{date:'28 May 2026', score:'3/4', status:'IN_PROGRESS'}}`
+	want := `{"item":{"date":"2026-05-28","score":0.75,"status":"in-progress"}}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNestedItemItemsWithZeroWidthKeyAndNumericArray(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["groups"],
+	  "properties": {
+	    "groups": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["items", "status"],
+	        "properties": {
+	          "items": {
+	            "type": "array",
+	            "items": {"type": "string"}
+	          },
+	          "status": {
+	            "type": "string",
+	            "enum": ["ready", "done"]
+	          }
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+	const zwsp = "\u200b"
+
+	input := `{
+	  result: {
+	    groups: {
+	      "0": {"it` + zwsp + `em": 'Ada', status: 'READY'},
+	      "1": {item: 'Grace', status: 'DONE'}
+	    }
+	  }
+	}`
+	want := `{"groups":[{"items":["Ada"],"status":"ready"},{"items":["Grace"],"status":"done"}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsItemsArrayToItemAfterNumericKeyArrayAndTimeScalar(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["records"],
+	  "properties": {
+	    "records": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["item"],
+	        "properties": {
+	          "item": {
+	            "type": "object",
+	            "required": ["timestamp"],
+	            "properties": {
+	              "timestamp": {"type": "string", "format": "date-time"}
+	            },
+	            "additionalProperties": false
+	          }
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "Here is the value:\n```\n{output:{records:{\"1\":{items:[{timestamp:'2026-05-28 13:45:00z'}]}}}}\n```"
+	want := `{"records":[{"item":{"timestamp":"2026-05-28T13:45:00Z"}}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
 func TestEnsureFullPipelineRepairsKeyValueMapThenEnumAndDateScalars(t *testing.T) {
 	const schema = `{
 	  "type": "object",

@@ -27,11 +27,16 @@ func unwrapResponseObject(current string, schema *jsonschema.Schema) (string, bo
 	}
 
 	var wrapped any
+	var wrapperKey string
 	for key, value := range object {
 		if _, ok := responseWrapperKeys[key]; !ok {
 			return current, false
 		}
+		wrapperKey = key
 		wrapped = value
+	}
+	if shouldPreserveItemItemsWrapper(wrapperKey, schema) {
+		return current, false
 	}
 
 	candidate, err := marshalCanonicalJSON(wrapped)
@@ -42,4 +47,20 @@ func unwrapResponseObject(current string, schema *jsonschema.Schema) (string, bo
 		return current, false
 	}
 	return candidate, true
+}
+
+func shouldPreserveItemItemsWrapper(key string, schema *jsonschema.Schema) bool {
+	for _, branch := range candidateSchemaBranches(schema) {
+		switch key {
+		case "item":
+			if itemsSchema, ok := branch.Properties["items"]; ok && schemaExpectsArray(itemsSchema) {
+				return true
+			}
+		case "items":
+			if _, ok := branch.Properties["item"]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
