@@ -11,6 +11,13 @@ import (
 )
 
 var numericDatePattern = regexp.MustCompile(`^(\d{1,2})/(\d{1,2})/(\d{4})$`)
+var simpleDurationPattern = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)\s+([A-Za-z]+)$`)
+
+const (
+	maxEpochSeconds = 32503680000
+	maxEpochMillis  = maxEpochSeconds * 1000
+	maxEpochMicros  = maxEpochSeconds * 1000 * 1000
+)
 
 func repairScalarSchemaValues(current string, schema *jsonschema.Schema) (string, bool) {
 	value, _, err := parseAndNormalizeJSON(current)
@@ -40,6 +47,17 @@ func enumerateScalarSchemaValueCandidates(value any, schema *jsonschema.Schema, 
 	if text, ok := value.(string); ok {
 		for _, branch := range branches {
 			if candidate, ok := scalarSchemaValueCandidate(text, branch); ok {
+				if yield(candidate) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	if number, ok := value.(json.Number); ok {
+		for _, branch := range branches {
+			if candidate, ok := scalarSchemaNumberCandidate(number, branch); ok {
 				if yield(candidate) {
 					return true
 				}
@@ -97,8 +115,24 @@ func scalarSchemaValueCandidate(value string, schema *jsonschema.Schema) (any, b
 		return nil, true
 	}
 	if schemaExpectsISODate(schema) {
+		if isoDate, ok := parseEpochDate(value); ok {
+			return isoDate, true
+		}
 		if isoDate, ok := parseConservativeDate(value); ok {
 			return isoDate, true
+		}
+	}
+	if schemaExpectsISODateTime(schema) {
+		if isoDateTime, ok := parseEpochDateTime(value); ok {
+			return isoDateTime, true
+		}
+		if isoDateTime, ok := parseConservativeDateTime(value); ok {
+			return isoDateTime, true
+		}
+	}
+	if schemaExpectsISODuration(schema) {
+		if duration, ok := parseConservativeDuration(value); ok {
+			return duration, true
 		}
 	}
 	if schemaAllowsType(schema, "integer") {
@@ -115,10 +149,43 @@ func scalarSchemaValueCandidate(value string, schema *jsonschema.Schema) (any, b
 	return nil, false
 }
 
+func scalarSchemaNumberCandidate(value json.Number, schema *jsonschema.Schema) (any, bool) {
+	schema = resolveSchemaRef(schema)
+	if schema == nil {
+		return nil, false
+	}
+
+	if schemaExpectsISODate(schema) {
+		if isoDate, ok := parseEpochDate(value.String()); ok {
+			return isoDate, true
+		}
+	}
+	if schemaExpectsISODateTime(schema) {
+		if isoDateTime, ok := parseEpochDateTime(value.String()); ok {
+			return isoDateTime, true
+		}
+	}
+	return nil, false
+}
+
 func schemaExpectsISODate(schema *jsonschema.Schema) bool {
 	return schema != nil &&
 		schema.Format != nil &&
 		schema.Format.Name == "date" &&
+		(schema.Types == nil || schema.Types.IsEmpty() || schemaAllowsType(schema, "string"))
+}
+
+func schemaExpectsISODateTime(schema *jsonschema.Schema) bool {
+	return schema != nil &&
+		schema.Format != nil &&
+		schema.Format.Name == "date-time" &&
+		(schema.Types == nil || schema.Types.IsEmpty() || schemaAllowsType(schema, "string"))
+}
+
+func schemaExpectsISODuration(schema *jsonschema.Schema) bool {
+	return schema != nil &&
+		schema.Format != nil &&
+		schema.Format.Name == "duration" &&
 		(schema.Types == nil || schema.Types.IsEmpty() || schemaAllowsType(schema, "string"))
 }
 
@@ -146,6 +213,110 @@ func parseConservativeDate(value string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func parseConservativeDateTime(value string) (string, bool) {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) < len("2006-01-02T15:04:05Z") {
+		return "", false
+	}
+
+	candidate := trimmed
+	if len(candidate) > 10 && candidate[10] == ' ' {
+		candidate = candidate[:10] + "T" + candidate[11:]
+	}
+	if strings.HasSuffix(candidate, "z") {
+		candidate = strings.TrimSuffix(candidate, "z") + "Z"
+	}
+
+	parsed, err := time.Parse(time.RFC3339Nano, candidate)
+	if err != nil {
+		return "", false
+	}
+	return parsed.UTC().Format(time.RFC3339Nano), true
+}
+
+func parseEpochDate(value string) (string, bool) {
+	epochTime, ok := parseEpochTimestamp(value)
+	if !ok {
+		return "", false
+	}
+	return epochTime.Format(time.DateOnly), true
+}
+
+func parseEpochDateTime(value string) (string, bool) {
+	epochTime, ok := parseEpochTimestamp(value)
+	if !ok {
+		return "", false
+	}
+	return epochTime.Format(time.RFC3339Nano), true
+}
+
+func parseEpochTimestamp(value string) (time.Time, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	for _, ch := range trimmed {
+		if ch < '0' || ch > '9' {
+			return time.Time{}, false
+		}
+	}
+	if len(trimmed) > 1 && trimmed[0] == '0' {
+		return time.Time{}, false
+	}
+
+	raw, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || raw < 0 || raw > maxEpochMicros {
+		return time.Time{}, false
+	}
+
+	var epochTime time.Time
+	switch {
+	case raw <= maxEpochSeconds:
+		epochTime = time.Unix(raw, 0)
+	case raw <= maxEpochMillis:
+		epochTime = time.Unix(raw/1000, (raw%1000)*int64(time.Millisecond))
+	default:
+		epochTime = time.Unix(raw/1000000, (raw%1000000)*int64(time.Microsecond))
+	}
+	epochTime = epochTime.UTC()
+	if epochTime.Year() < 1970 || epochTime.Year() > 3000 {
+		return time.Time{}, false
+	}
+	return epochTime, true
+}
+
+func parseConservativeDuration(value string) (string, bool) {
+	matches := simpleDurationPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if matches == nil {
+		return "", false
+	}
+
+	amount := matches[1]
+	unit := strings.ToLower(matches[2])
+	hasDecimal := strings.Contains(amount, ".")
+	if hasDecimal {
+		return "", false
+	}
+	if _, err := strconv.ParseUint(amount, 10, 64); err != nil {
+		return "", false
+	}
+
+	switch unit {
+	case "second", "seconds":
+		return "PT" + amount + "S", true
+	case "minute", "minutes":
+		return "PT" + amount + "M", true
+	case "hour", "hours":
+		return "PT" + amount + "H", true
+	case "day", "days":
+		return "P" + amount + "D", true
+	case "week", "weeks":
+		return "P" + amount + "W", true
+	default:
+		return "", false
+	}
 }
 
 func normalizeDateInput(value string) string {

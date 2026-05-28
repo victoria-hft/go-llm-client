@@ -4,6 +4,8 @@ package schema_compliance
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -109,13 +111,25 @@ func normalizeIfSchemaCompliant(output string, schema *jsonschema.Schema) (strin
 	if err := schema.Validate(value); err != nil {
 		return "", &Error{Kind: ErrorKindSchemaViolation, Err: err}
 	}
+	if schemaLoss(normalized, schema) != 0 {
+		return "", &Error{Kind: ErrorKindSchemaViolation, Err: errors.New("schema-compliant JSON is not canonical")}
+	}
 	return normalized, nil
 }
 
 func parseAndNormalizeJSON(output string) (any, string, error) {
 	trimmed := strings.TrimSpace(output)
-	value, err := jsonschema.UnmarshalJSON(strings.NewReader(trimmed))
-	if err != nil {
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.UseNumber()
+
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, "", err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("invalid JSON: multiple top-level values")
+		}
 		return nil, "", err
 	}
 

@@ -112,6 +112,22 @@ func TestSchemaLossScoresInvalidFormatHigherThanValidFormat(t *testing.T) {
 	}
 }
 
+func TestSchemaLossScoresNonCanonicalDateTimeHigherThanCanonicalDateTime(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["timestamp"],
+	  "properties": {"timestamp": {"type": "string", "format": "date-time"}},
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	nonCanonicalLoss := schemaLoss(`{"timestamp":"2026-05-28T13:45:00z"}`, schema)
+	canonicalLoss := schemaLoss(`{"timestamp":"2026-05-28T13:45:00Z"}`, schema)
+	if nonCanonicalLoss <= canonicalLoss {
+		t.Fatalf("non-canonical loss = %d, canonical loss = %d, want non-canonical > canonical", nonCanonicalLoss, canonicalLoss)
+	}
+}
+
 func TestSchemaLossUsesClosestOneOfBranch(t *testing.T) {
 	const schemaJSON = `{
 	  "oneOf": [

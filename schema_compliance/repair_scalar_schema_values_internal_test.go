@@ -50,6 +50,45 @@ func TestRepairScalarSchemaValuesDoesNotGuessAmbiguousNumericDate(t *testing.T) 
 	}
 }
 
+func TestRepairScalarSchemaValuesMakesOneEpochChangePerInvocation(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["start", "end"],
+	  "properties": {
+	    "start": {"type": "string", "format": "date-time"},
+	    "end": {"type": "string", "format": "date-time"}
+	  },
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	got, changed := repairScalarSchemaValues(`{"start":1779975900,"end":1780062300}`, schema)
+	if !changed {
+		t.Fatal("repairScalarSchemaValues did not change input")
+	}
+	want := `{"end":"2026-05-29T13:45:00Z","start":1779975900}`
+	if got != want {
+		t.Fatalf("repairScalarSchemaValues() = %q, want %q", got, want)
+	}
+}
+
+func TestRepairScalarSchemaValuesDoesNotRepairDurationWithoutFormat(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["duration"],
+	  "properties": {
+	    "duration": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	_, changed := repairScalarSchemaValues(`{"duration":"5 minutes"}`, schema)
+	if changed {
+		t.Fatal("repairScalarSchemaValues repaired duration text without duration format")
+	}
+}
+
 const basicObjectSchemaForInternalScalarTests = `{
   "type": "object",
   "required": ["name"],

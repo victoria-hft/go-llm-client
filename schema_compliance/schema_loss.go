@@ -17,6 +17,7 @@ const (
 	arrayWrapperLoss         = 50
 	objectArrayWrapperLoss   = 10_000
 	enumOrConstMismatchLoss  = 10
+	canonicalFormatLoss      = 5
 )
 
 func schemaLoss(jsonText string, schema *jsonschema.Schema) int {
@@ -25,13 +26,77 @@ func schemaLoss(jsonText string, schema *jsonschema.Schema) int {
 		return invalidJSONLoss
 	}
 	if err := schema.Validate(value); err == nil {
-		return 0
+		return canonicalFormatValueLoss(value, resolveSchemaRef(schema))
 	}
 	loss := valueLoss(value, resolveSchemaRef(schema))
 	if loss <= 0 {
 		return validationFallbackLoss
 	}
 	return loss
+}
+
+func canonicalFormatValueLoss(value any, schema *jsonschema.Schema) int {
+	schema = resolveSchemaRef(schema)
+	if schema == nil {
+		return 0
+	}
+
+	loss := 0
+	if text, ok := value.(string); ok && schemaExpectsISODateTime(schema) {
+		if canonical, ok := parseConservativeDateTime(text); ok && canonical != text {
+			loss += canonicalFormatLoss
+		}
+	}
+
+	if object, ok := value.(map[string]any); ok {
+		for name, propertySchema := range schema.Properties {
+			if propertyValue, ok := object[name]; ok {
+				loss += canonicalFormatValueLoss(propertyValue, propertySchema)
+			}
+		}
+	}
+
+	if array, ok := value.([]any); ok {
+		for index, item := range array {
+			itemLoss := 0
+			foundSchema := false
+			for _, itemSchema := range itemSchemasForIndex(arrayItemSchemas(schema), schema, index) {
+				lossForSchema := canonicalFormatValueLoss(item, itemSchema)
+				if !foundSchema || lossForSchema < itemLoss {
+					itemLoss = lossForSchema
+				}
+				foundSchema = true
+			}
+			loss += itemLoss
+		}
+	}
+
+	if len(schema.AllOf) > 0 {
+		for _, branch := range schema.AllOf {
+			loss += canonicalFormatValueLoss(value, branch)
+		}
+	}
+	if len(schema.AnyOf) > 0 {
+		loss += closestCanonicalFormatBranchLoss(value, schema.AnyOf)
+	}
+	if len(schema.OneOf) > 0 {
+		loss += closestCanonicalFormatBranchLoss(value, schema.OneOf)
+	}
+	return loss
+}
+
+func closestCanonicalFormatBranchLoss(value any, branches []*jsonschema.Schema) int {
+	if len(branches) == 0 {
+		return 0
+	}
+
+	best := validationFallbackLoss
+	for _, branch := range branches {
+		if loss := canonicalFormatValueLoss(value, branch); loss < best {
+			best = loss
+		}
+	}
+	return best
 }
 
 func valueLoss(value any, schema *jsonschema.Schema) int {

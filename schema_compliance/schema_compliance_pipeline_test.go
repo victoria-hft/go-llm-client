@@ -188,6 +188,33 @@ const pipelineNestedBuildsSchema = `{
   "additionalProperties": false
 }`
 
+const pipelineTimedJobSchema = `{
+  "type": "object",
+  "required": ["name", "run", "status", "steps"],
+  "properties": {
+    "name": {"type": "string"},
+    "run": {
+      "type": "object",
+      "required": ["date", "timestamp", "duration"],
+      "properties": {
+        "date": {"type": "string", "format": "date"},
+        "timestamp": {"type": "string", "format": "date-time"},
+        "duration": {"type": "string", "format": "duration"}
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "string",
+      "enum": ["in-progress", "done"]
+    },
+    "steps": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "additionalProperties": false
+}`
+
 func TestEnsureFullPipelineRepairsTransportJunkFencedRelaxedWrappedNestedScalarOutput(t *testing.T) {
 	const zwsp = "\u200b"
 
@@ -334,6 +361,57 @@ func TestEnsureFullPipelineRepairsSmartQuotesBeforeRelaxedJSON(t *testing.T) {
 	want := `{"tags":["math","proof"],"text":"plain value"}`
 
 	assertEnsurePipeline(t, input, pipelineTextTagsSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsTimeScalarsWithExistingStages(t *testing.T) {
+	input := "Here is the value:\n```json\n" +
+		`{
+		  payload: {
+		    name: 'Nightly',
+		    run: {
+		      date: '2026/05/28',
+		      timestamp: 1779975900000,
+		      duration: '5 minutes'
+		    },
+		    status: 'IN_PROGRESS',
+		    steps: {“1”: 'go test ./...', “2”: 'make'}
+		  }
+		}` +
+		"\n```"
+	want := `{"name":"Nightly","run":{"date":"2026-05-28","duration":"PT5M","timestamp":"2026-05-28T13:45:00Z"},"status":"in-progress","steps":["go test ./...","make"]}`
+
+	assertEnsurePipeline(t, input, pipelineTimedJobSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsNestedTimeScalarsAfterKeyValueObjectConversion(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["jobs"],
+	  "properties": {
+	    "jobs": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["metadata", "timestamp", "duration"],
+	        "properties": {
+	          "metadata": {
+	            "type": "object",
+	            "additionalProperties": {"type": "string"}
+	          },
+	          "timestamp": {"type": "string", "format": "date-time"},
+	          "duration": {"type": "string", "format": "duration"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{result:{jobs:{"0":{metadata:[{name:'owner', value:'Ada'}], timestamp:'2026-05-28 13:45:00z', duration:'2 hours'}}}}`
+	want := `{"jobs":[{"duration":"PT2H","metadata":{"owner":"Ada"},"timestamp":"2026-05-28T13:45:00Z"}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
 }
 
 func TestEnsureFullPipelineRepairsKeyValueMapThenEnumAndDateScalars(t *testing.T) {

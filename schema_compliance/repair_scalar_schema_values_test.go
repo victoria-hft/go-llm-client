@@ -18,6 +18,30 @@ const isoDateSchema = `{
   "additionalProperties": false
 }`
 
+const isoDateTimeSchema = `{
+  "type": "object",
+  "required": ["timestamp"],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false
+}`
+
+const isoDurationSchema = `{
+  "type": "object",
+  "required": ["duration"],
+  "properties": {
+    "duration": {
+      "type": "string",
+      "format": "duration"
+    }
+  },
+  "additionalProperties": false
+}`
+
 func TestEnsureRepairsHumanDateToISODate(t *testing.T) {
 	got, err := schema_compliance.Ensure(`{"date":"28 May 2026"}`, isoDateSchema)
 	if err != nil {
@@ -47,6 +71,124 @@ func TestEnsureRepairsConservativeDateFormats(t *testing.T) {
 			if got != want {
 				t.Fatalf("Ensure() = %q, want %q", got, want)
 			}
+		})
+	}
+}
+
+func TestEnsureRepairsEpochTimestampsToISODate(t *testing.T) {
+	tests := map[string]string{
+		`1779975900`:       "2026-05-28",
+		`"1779975900000"`:  "2026-05-28",
+		`1779975900000000`: "2026-05-28",
+	}
+
+	for input, wantDate := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"date":`+input+`}`, isoDateSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"date":"` + wantDate + `"}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsEpochTimestampsToISODateTime(t *testing.T) {
+	tests := map[string]string{
+		`1779975900`:       "2026-05-28T13:45:00Z",
+		`"1779975900000"`:  "2026-05-28T13:45:00Z",
+		`1779975900000000`: "2026-05-28T13:45:00Z",
+	}
+
+	for input, wantTimestamp := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"timestamp":`+input+`}`, isoDateTimeSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"timestamp":"` + wantTimestamp + `"}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsDateTimeSeparatorAndUTCMarker(t *testing.T) {
+	tests := map[string]string{
+		"2026-05-28 13:45:00Z": "2026-05-28T13:45:00Z",
+		"2026-05-28T13:45:00z": "2026-05-28T13:45:00Z",
+		"2026-05-28 13:45:00z": "2026-05-28T13:45:00Z",
+	}
+
+	for input, wantTimestamp := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"timestamp":"`+input+`"}`, isoDateTimeSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"timestamp":"` + wantTimestamp + `"}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsSimpleDurationText(t *testing.T) {
+	tests := map[string]string{
+		"5 minutes": "PT5M",
+		"2 hours":   "PT2H",
+		"3 days":    "P3D",
+		"1 week":    "P1W",
+	}
+
+	for input, wantDuration := range tests {
+		t.Run(input, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"duration":"`+input+`"}`, isoDurationSchema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"duration":"` + wantDuration + `"}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureDoesNotRepairUnsafeEpochTimestamps(t *testing.T) {
+	tests := []string{
+		`-1`,
+		`1.7799759e9`,
+		`1779975900.5`,
+		`32535216001000000`,
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			_, err := schema_compliance.Ensure(`{"timestamp":`+input+`}`, isoDateTimeSchema)
+			assertSchemaViolationError(t, err)
+		})
+	}
+}
+
+func TestEnsureDoesNotRepairUnsafeDurationText(t *testing.T) {
+	tests := []string{
+		"1 hour 30 minutes",
+		"about 5 minutes",
+		"5m",
+		"1.5 minutes",
+		"5",
+	}
+
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			_, err := schema_compliance.Ensure(`{"duration":"`+input+`"}`, isoDurationSchema)
+			assertSchemaViolationError(t, err)
 		})
 	}
 }

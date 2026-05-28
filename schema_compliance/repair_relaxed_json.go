@@ -266,11 +266,10 @@ func (p *relaxedJSONParser) parseNumber() (any, bool) {
 	}
 
 	number := p.input[start:p.pos]
-	value, err := strconv.ParseFloat(number, 64)
-	if err != nil {
+	if _, err := strconv.ParseFloat(number, 64); err != nil {
 		return nil, false
 	}
-	return value, true
+	return json.Number(number), true
 }
 
 func (p *relaxedJSONParser) parseBareValue() (any, bool) {
