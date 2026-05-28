@@ -28,21 +28,12 @@ func Ensure(output string, schemaJSON string) (string, error) {
 		}
 	}
 
-	for {
-		changed := false
-		for _, fix := range iterativeFixes() {
-			next, didChange := fix(current)
-			if didChange {
-				current = next
-				changed = true
-				break
-			}
-		}
-		if !changed {
-			break
-		}
+	current = runFixesUntilStable(current, jsonSyntaxFixes())
+	if err := ValidateJSON(current); err != nil {
+		return "", err
 	}
 
+	current = runFixesUntilStable(current, schemaComplianceFixes())
 	normalized, err := normalizeIfSchemaCompliant(current, schema)
 	if err == nil {
 		return normalized, nil
@@ -51,6 +42,23 @@ func Ensure(output string, schemaJSON string) (string, error) {
 }
 
 type fixFunc func(string) (string, bool)
+
+func runFixesUntilStable(current string, fixes []fixFunc) string {
+	for {
+		changed := false
+		for _, fix := range fixes {
+			next, didChange := fix(current)
+			if didChange {
+				current = next
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			return current
+		}
+	}
+}
 
 // ValidateJSON returns nil when output is syntactically valid JSON.
 func ValidateJSON(output string) error {

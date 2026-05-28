@@ -6,6 +6,12 @@ func oneTimeFixes() []fixFunc {
 	}
 }
 
-func iterativeFixes() []fixFunc {
+func jsonSyntaxFixes() []fixFunc {
+	return []fixFunc{
+		repairRelaxedJSON,
+	}
+}
+
+func schemaComplianceFixes() []fixFunc {
 	return nil
 }
