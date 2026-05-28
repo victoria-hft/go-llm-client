@@ -899,6 +899,83 @@ func TestEnsureFullPipelineRejectsNaNForRequiredNumber(t *testing.T) {
 	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
 }
 
+func TestEnsureFullPipelineRepairsFencedPythonLiteralsWithRelaxedJSON(t *testing.T) {
+	input := "Here is the value:\n```json\n{name:'Ada',event:{date:'28 May 2026',city:'Paris',country:'France'},score:'42.5',status:None,tags:['research']}\n```"
+	want := `{"event":{"date":"2026-05-28","location":{"city":"Paris","country":"France"}},"name":"Ada","score":42.5,"status":null,"tags":["research"]}`
+
+	assertEnsurePipeline(t, input, pipelineProfileSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsWrappedPythonLiteralsWithScalarAndEnumOutput(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["sentiment", "date", "score", "ok"],
+	  "properties": {
+	    "sentiment": {
+	      "type": "string",
+	      "enum": ["positive", "neutral", "negative"]
+	    },
+	    "date": {"type": "string", "format": "date"},
+	    "score": {"type": "number"},
+	    "ok": {"type": "boolean"}
+	  },
+	  "additionalProperties": false
+	}`
+	input := `{answer:{sentiment:'Positive: customer is satisfied', date:'28 May 2026', score:'3/4', ok:True}}`
+	want := `{"date":"2026-05-28","ok":true,"score":0.75,"sentiment":"positive"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsPythonLiteralsAfterZeroWidthKeyCleanup(t *testing.T) {
+	const zwsp = "\u200b"
+
+	input := `{"na` + zwsp + `me":"Ada","event":{"date":"2026/05/28","city":"Paris","country":"France"},"score":"42","status":None,"tags":["research"]}`
+	want := `{"event":{"date":"2026-05-28","location":{"city":"Paris","country":"France"}},"name":"Ada","score":42,"status":null,"tags":["research"]}`
+
+	assertEnsurePipeline(t, input, pipelineProfileSchema, want)
+}
+
+func TestEnsureFullPipelineRepairsPythonLiteralsWithItemItemsAndNesting(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["items", "event", "active"],
+	  "properties": {
+	    "items": {
+	      "type": "array",
+	      "items": {"type": "string"}
+	    },
+	    "event": {
+	      "type": "object",
+	      "required": ["location"],
+	      "properties": {
+	        "location": {
+	          "type": "object",
+	          "required": ["city", "country"],
+	          "properties": {
+	            "city": {"type": "string"},
+	            "country": {"type": "string"}
+	          },
+	          "additionalProperties": false
+	        }
+	      },
+	      "additionalProperties": false
+	    },
+	    "active": {"type": "boolean"}
+	  },
+	  "additionalProperties": false
+	}`
+	input := `{item:'alpha',event:{city:'Paris',country:'France'},active:False}`
+	want := `{"active":false,"event":{"location":{"city":"Paris","country":"France"}},"items":["alpha"]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRejectsPythonLiteralWhenConvertedValueViolatesSchema(t *testing.T) {
+	_, err := schema_compliance.Ensure("```json\n{name:None}\n```", basicObjectSchema)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
+}
+
 func TestEnsureFullPipelineRepairsEnumExplanationWithScalarAndWrapperFixes(t *testing.T) {
 	const schema = `{
 	  "type": "object",

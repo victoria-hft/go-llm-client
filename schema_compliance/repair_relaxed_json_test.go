@@ -236,6 +236,136 @@ func TestEnsureRepairsRelaxedJSONUndefinedNestedAndArrayValues(t *testing.T) {
 	}
 }
 
+func TestEnsureRepairsRelaxedJSONPythonLiteralValues(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x", "ok", "done"],
+	  "properties": {
+	    "x": {"type": ["string", "null"]},
+	    "ok": {"type": "boolean"},
+	    "done": {"type": "boolean"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"x": None, "ok": True, "done": False}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"done":false,"ok":true,"x":null}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"done":false,"ok":true,"x":null}`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONPythonLiteralValuesWithUnquotedKeys(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["x", "ok"],
+	  "properties": {
+	    "x": {"type": ["string", "null"]},
+	    "ok": {"type": "boolean"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{x: None, ok: True}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	if got != `{"ok":true,"x":null}` {
+		t.Fatalf("Ensure() = %q, want %q", got, `{"ok":true,"x":null}`)
+	}
+}
+
+func TestEnsureRepairsRelaxedJSONPythonLiteralNestedAndArrayValues(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["items", "profile"],
+	  "properties": {
+	    "items": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["value", "ok"],
+	        "properties": {
+	          "value": {"type": ["string", "null"]},
+	          "ok": {"type": "boolean"}
+	        },
+	        "additionalProperties": false
+	      }
+	    },
+	    "profile": {
+	      "type": "object",
+	      "required": ["value", "ok"],
+	      "properties": {
+	        "value": {"type": ["string", "null"]},
+	        "ok": {"type": "boolean"}
+	      },
+	      "additionalProperties": false
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{items:[{value: None, ok: False}], profile:{value: None, ok: True}}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	want := `{"items":[{"ok":false,"value":null}],"profile":{"ok":true,"value":null}}`
+	if got != want {
+		t.Fatalf("Ensure() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureKeepsQuotedPythonLiteralStrings(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["none", "truth", "falsehood"],
+	  "properties": {
+	    "none": {"type": "string"},
+	    "truth": {"type": "string"},
+	    "falsehood": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"none":"None","truth":"True","falsehood":"False"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	want := `{"none":"None","truth":"True","falsehood":"False"}`
+	if got != want {
+		t.Fatalf("Ensure() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureKeepsPythonLiteralObjectKeys(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["None", "True", "False"],
+	  "properties": {
+	    "None": {"type": "string"},
+	    "True": {"type": "string"},
+	    "False": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{None: "nil", True: "yes", False: "no"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	want := `{"False":"no","None":"nil","True":"yes"}`
+	if got != want {
+		t.Fatalf("Ensure() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureReturnsSchemaViolationForPythonLiteralWhenConvertedValueNotAllowed(t *testing.T) {
+	_, err := schema_compliance.Ensure(`{name: None}`, basicObjectSchema)
+	assertSchemaViolationError(t, err)
+}
+
 func TestEnsureRepairsRelaxedJSONBareNaNValueToString(t *testing.T) {
 	const schema = `{
 	  "type": "object",
