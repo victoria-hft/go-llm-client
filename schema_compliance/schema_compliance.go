@@ -33,7 +33,11 @@ func Ensure(output string, schemaJSON string) (string, error) {
 		return "", err
 	}
 
-	current = runFixesUntilStable(current, schemaComplianceFixes())
+	if normalized, err := normalizeIfSchemaCompliant(current, schema); err == nil {
+		return normalized, nil
+	}
+
+	current = runSchemaFixesUntilStable(current, schema, schemaComplianceFixes())
 	normalized, err := normalizeIfSchemaCompliant(current, schema)
 	if err == nil {
 		return normalized, nil
@@ -42,12 +46,30 @@ func Ensure(output string, schemaJSON string) (string, error) {
 }
 
 type fixFunc func(string) (string, bool)
+type schemaFixFunc func(string, *jsonschema.Schema) (string, bool)
 
 func runFixesUntilStable(current string, fixes []fixFunc) string {
 	for {
 		changed := false
 		for _, fix := range fixes {
 			next, didChange := fix(current)
+			if didChange {
+				current = next
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			return current
+		}
+	}
+}
+
+func runSchemaFixesUntilStable(current string, schema *jsonschema.Schema, fixes []schemaFixFunc) string {
+	for {
+		changed := false
+		for _, fix := range fixes {
+			next, didChange := fix(current, schema)
 			if didChange {
 				current = next
 				changed = true
@@ -106,4 +128,14 @@ func parseAndNormalizeJSON(output string) (any, string, error) {
 
 func compactJSON(dst *bytes.Buffer, src string) error {
 	return json.Compact(dst, []byte(src))
+}
+
+func marshalCanonicalJSON(value any) (string, error) {
+	var output bytes.Buffer
+	encoder := json.NewEncoder(&output)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output.String()), nil
 }

@@ -12,6 +12,9 @@ func jsonSyntaxFixes() []fixFunc {
 	}
 }
 
-func schemaComplianceFixes() []fixFunc {
-	return nil
+func schemaComplianceFixes() []schemaFixFunc {
+	return []schemaFixFunc{
+		unwrapResponseObject,
+		unwrapSingleItemArray,
+	}
 }
