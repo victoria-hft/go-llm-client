@@ -30,6 +30,7 @@ func schemaComplianceFixes() []schemaFixFunc {
 		repairNumericKeyObjectArray,
 		repairItemItemsShape,
 		repairObjectFieldNesting,
+		repairEmptyContainerNullability,
 		repairScalarSchemaValues,
 		repairEnumStringValues,
 	}

@@ -971,6 +971,98 @@ func TestEnsureFullPipelineRepairsPythonLiteralsWithItemItemsAndNesting(t *testi
 	assertEnsurePipeline(t, input, schema, want)
 }
 
+func TestEnsureFullPipelineRepairsEmptyObjectToNullWithWrapperEnumAndScalarFixes(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["status", "score", "tags"],
+	  "properties": {
+	    "status": {
+	      "type": "string",
+	      "enum": ["in-progress", "done"]
+	    },
+	    "score": {"type": ["number", "null"]},
+	    "tags": {
+	      "type": "array",
+	      "items": {"type": "string"}
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "Here is the value:\n```json\n{payload:{status:'IN_PROGRESS', score:{}, tags:null}}\n```"
+	want := `{"score":null,"status":"in-progress","tags":[]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsEmptyArrayToNullAfterZeroWidthKeyCleanup(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["name", "note"],
+	  "properties": {
+	    "name": {"type": "string"},
+	    "note": {"type": ["string", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+	const zwsp = "\u200b"
+
+	input := `{"na` + zwsp + `me":"Ada","note":[]}`
+	want := `{"name":"Ada","note":null}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsNullToEmptyArrayWithNestingAndScalarFixes(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["event", "aliases"],
+	  "properties": {
+	    "event": {
+	      "type": "object",
+	      "required": ["date", "location"],
+	      "properties": {
+	        "date": {"type": "string", "format": "date"},
+	        "location": {
+	          "type": "object",
+	          "required": ["city", "country"],
+	          "properties": {
+	            "city": {"type": "string"},
+	            "country": {"type": "string"}
+	          },
+	          "additionalProperties": false
+	        }
+	      },
+	      "additionalProperties": false
+	    },
+	    "aliases": {
+	      "type": "array",
+	      "items": {"type": "string"}
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := `{answer:{event:{date:'28 May 2026',city:'Paris',country:'France'},aliases:null}}`
+	want := `{"aliases":[],"event":{"date":"2026-05-28","location":{"city":"Paris","country":"France"}}}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRejectsNonEmptyContainerNullabilityRepair(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["score"],
+	  "properties": {
+	    "score": {"type": ["number", "null"]}
+	  },
+	  "additionalProperties": false
+	}`
+
+	_, err := schema_compliance.Ensure("```json\n{payload:{score:{value:'1_000'}}}\n```", schema)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
+}
+
 func TestEnsureFullPipelineRejectsPythonLiteralWhenConvertedValueViolatesSchema(t *testing.T) {
 	_, err := schema_compliance.Ensure("```json\n{name:None}\n```", basicObjectSchema)
 	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
