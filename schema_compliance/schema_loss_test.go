@@ -128,6 +128,22 @@ func TestSchemaLossScoresNonCanonicalDateTimeHigherThanCanonicalDateTime(t *test
 	}
 }
 
+func TestSchemaLossScoresNonCanonicalUUIDHigherThanCanonicalUUID(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["id"],
+	  "properties": {"id": {"type": "string"}},
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	nonCanonicalLoss := schemaLoss(`{"id":"F0307D30EAD2417392873DAB7FFA0FA4"}`, schema)
+	canonicalLoss := schemaLoss(`{"id":"f0307d30-ead2-4173-9287-3dab7ffa0fa4"}`, schema)
+	if nonCanonicalLoss <= canonicalLoss {
+		t.Fatalf("non-canonical loss = %d, canonical loss = %d, want non-canonical > canonical", nonCanonicalLoss, canonicalLoss)
+	}
+}
+
 func TestSchemaLossUsesClosestOneOfBranch(t *testing.T) {
 	const schemaJSON = `{
 	  "oneOf": [

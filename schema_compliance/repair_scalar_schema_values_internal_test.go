@@ -150,6 +150,28 @@ func TestRepairScalarSchemaValuesMakesOneNaNChangePerInvocation(t *testing.T) {
 	}
 }
 
+func TestRepairScalarSchemaValuesMakesOneUUIDChangePerInvocation(t *testing.T) {
+	const schemaJSON = `{
+	  "type": "object",
+	  "required": ["first", "second"],
+	  "properties": {
+	    "first": {"type": "string"},
+	    "second": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+	schema := mustCompileTestSchema(t, schemaJSON)
+
+	got, changed := repairScalarSchemaValues(`{"first":"F0307D30EAD2417392873DAB7FFA0FA4","second":"F0307D30EAD2417392873DAB7FFA0FA4"}`, schema)
+	if !changed {
+		t.Fatal("repairScalarSchemaValues did not repair UUID string")
+	}
+	want := `{"first":"f0307d30-ead2-4173-9287-3dab7ffa0fa4","second":"F0307D30EAD2417392873DAB7FFA0FA4"}`
+	if got != want {
+		t.Fatalf("repairScalarSchemaValues() = %q, want %q", got, want)
+	}
+}
+
 const basicObjectSchemaForInternalScalarTests = `{
   "type": "object",
   "required": ["name"],

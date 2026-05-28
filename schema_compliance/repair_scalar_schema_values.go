@@ -122,6 +122,11 @@ func scalarSchemaValueCandidate(value string, schema *jsonschema.Schema, propert
 		return nil, false
 	}
 
+	if schemaAllowsStringValue(schema) {
+		if canonicalUUID, ok := parseCanonicalUUID(value); ok && canonicalUUID != value {
+			return canonicalUUID, true
+		}
+	}
 	if schemaExpectsURL(schema) || propertyNameLooksLikeURL(propertyName) {
 		if repairedURL, ok := parseConservativeURL(value); ok {
 			return repairedURL, true
@@ -241,6 +246,10 @@ func schemaExpectsURL(schema *jsonschema.Schema) bool {
 		(schema.Types == nil || schema.Types.IsEmpty() || schemaAllowsType(schema, "string"))
 }
 
+func schemaAllowsStringValue(schema *jsonschema.Schema) bool {
+	return schema != nil && (schema.Types == nil || schema.Types.IsEmpty() || schemaAllowsType(schema, "string"))
+}
+
 func propertyNameLooksLikeURL(propertyName string) bool {
 	lower := strings.ToLower(propertyName)
 	return strings.Contains(lower, "url") ||
@@ -287,6 +296,60 @@ func parseConservativeURL(value string) (string, bool) {
 		return "", false
 	}
 	return repaired, true
+}
+
+func parseCanonicalUUID(value string) (string, bool) {
+	candidate := value
+	if strings.HasPrefix(strings.ToLower(candidate), "urn:uuid:") {
+		candidate = candidate[len("urn:uuid:"):]
+	}
+	if len(candidate) >= 2 && candidate[0] == '{' && candidate[len(candidate)-1] == '}' {
+		candidate = candidate[1 : len(candidate)-1]
+	}
+	if candidate == "" || strings.ContainsAny(candidate, " \t\r\n") {
+		return "", false
+	}
+
+	hex := make([]byte, 0, 32)
+	previousDash := false
+	for index := 0; index < len(candidate); index++ {
+		character := candidate[index]
+		if character == '-' {
+			if index == 0 || index == len(candidate)-1 || previousDash {
+				return "", false
+			}
+			previousDash = true
+			continue
+		}
+		normalized, ok := normalizeHexByte(character)
+		if !ok {
+			return "", false
+		}
+		hex = append(hex, normalized)
+		previousDash = false
+	}
+	if len(hex) != 32 {
+		return "", false
+	}
+
+	return string(hex[0:8]) + "-" +
+		string(hex[8:12]) + "-" +
+		string(hex[12:16]) + "-" +
+		string(hex[16:20]) + "-" +
+		string(hex[20:32]), true
+}
+
+func normalizeHexByte(character byte) (byte, bool) {
+	switch {
+	case character >= '0' && character <= '9':
+		return character, true
+	case character >= 'a' && character <= 'f':
+		return character, true
+	case character >= 'A' && character <= 'F':
+		return character + ('a' - 'A'), true
+	default:
+		return 0, false
+	}
 }
 
 func isClearlySchemelessHTTPURL(value string) bool {

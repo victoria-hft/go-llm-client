@@ -52,6 +52,11 @@ func canonicalFormatValueLoss(value any, schema *jsonschema.Schema, propertyName
 			loss += canonicalFormatLoss
 		}
 	}
+	if text, ok := value.(string); ok && schemaAllowsStringValue(schema) {
+		if canonical, ok := parseCanonicalUUID(text); ok && canonical != text {
+			loss += canonicalFormatLoss
+		}
+	}
 
 	if object, ok := value.(map[string]any); ok {
 		for name, propertySchema := range schema.Properties {

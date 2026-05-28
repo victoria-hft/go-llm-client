@@ -626,6 +626,119 @@ func TestEnsureRepairsMultipleURLsThroughSchemaLoop(t *testing.T) {
 	}
 }
 
+func TestEnsureRepairsUUIDStringsToCanonicalFormat(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["id"],
+	  "properties": {
+	    "id": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+	tests := map[string]string{
+		"uppercase_canonical": `"F0307D30-EAD2-4173-9287-3DAB7FFA0FA4"`,
+		"without_dashes":      `"f0307d30ead2417392873dab7ffa0fa4"`,
+		"different_dashes":    `"f0307d30ead2-41739287-3dab7ffa0fa4"`,
+		"braced":              `"{f0307d30-ead2-4173-9287-3dab7ffa0fa4}"`,
+		"urn":                 `"urn:uuid:F0307D30-EAD2-4173-9287-3DAB7FFA0FA4"`,
+	}
+
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := schema_compliance.Ensure(`{"id":`+input+`}`, schema)
+			if err != nil {
+				t.Fatalf("Ensure returned error: %v", err)
+			}
+			want := `{"id":"f0307d30-ead2-4173-9287-3dab7ffa0fa4"}`
+			if got != want {
+				t.Fatalf("Ensure() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestEnsureRepairsUUIDStringsRecursively(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["records"],
+	  "properties": {
+	    "records": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["id"],
+	        "properties": {
+	          "id": {"type": "string"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"records":[{"id":"F0307D30EAD2417392873DAB7FFA0FA4"}]}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	want := `{"records":[{"id":"f0307d30-ead2-4173-9287-3dab7ffa0fa4"}]}`
+	if got != want {
+		t.Fatalf("Ensure() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureRepairsUUIDStringsThroughOneOfBranch(t *testing.T) {
+	const schema = `{
+	  "oneOf": [
+	    {
+	      "type": "object",
+	      "required": ["id"],
+	      "properties": {
+	        "id": {"type": "string", "format": "uuid"}
+	      },
+	      "additionalProperties": false
+	    },
+	    {
+	      "type": "object",
+	      "required": ["name"],
+	      "properties": {
+	        "name": {"type": "string"}
+	      },
+	      "additionalProperties": false
+	    }
+	  ]
+	}`
+
+	got, err := schema_compliance.Ensure(`{"id":"F0307D30EAD2417392873DAB7FFA0FA4"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	want := `{"id":"f0307d30-ead2-4173-9287-3dab7ffa0fa4"}`
+	if got != want {
+		t.Fatalf("Ensure() = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureDoesNotRepairInvalidUUIDLikeStrings(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["id"],
+	  "properties": {
+	    "id": {"type": "string"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	got, err := schema_compliance.Ensure(`{"id":"f0307d30--ead2-4173-9287-3dab7ffa0fa4"}`, schema)
+	if err != nil {
+		t.Fatalf("Ensure returned error: %v", err)
+	}
+	want := `{"id":"f0307d30--ead2-4173-9287-3dab7ffa0fa4"}`
+	if got != want {
+		t.Fatalf("Ensure() = %q, want %q", got, want)
+	}
+}
+
 func TestEnsureDoesNotRepairURLForNonURLStringField(t *testing.T) {
 	got, err := schema_compliance.Ensure(`{"name":"x.com/foo bar"}`, basicObjectSchema)
 	if err != nil {

@@ -553,6 +553,69 @@ func TestEnsureFullPipelineRepairsSmartQuotesZeroWidthURLKeyAndEnumExplanation(t
 	assertEnsurePipeline(t, input, schema, want)
 }
 
+func TestEnsureFullPipelineRepairsFencedWrappedUUIDWithEnumAndScalarFixes(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["id", "status", "date"],
+	  "properties": {
+	    "id": {"type": "string"},
+	    "status": {
+	      "type": "string",
+	      "enum": ["in-progress", "done"]
+	    },
+	    "date": {"type": "string", "format": "date"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	input := "Here is the value:\n```json\n{payload:{id:'F0307D30EAD2417392873DAB7FFA0FA4', status:'IN_PROGRESS', date:'28 May 2026'}}\n```"
+	want := `{"date":"2026-05-28","id":"f0307d30-ead2-4173-9287-3dab7ffa0fa4","status":"in-progress"}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRepairsUUIDsInsideNumericKeyArrayItems(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["records"],
+	  "properties": {
+	    "records": {
+	      "type": "array",
+	      "items": {
+	        "type": "object",
+	        "required": ["id", "source_url"],
+	        "properties": {
+	          "id": {"type": "string"},
+	          "source_url": {"type": "string"}
+	        },
+	        "additionalProperties": false
+	      }
+	    }
+	  },
+	  "additionalProperties": false
+	}`
+	const zwsp = "\u200b"
+
+	input := `{result:{records:{"1":{"id":"urn:uuid:F0307D30-EAD2-4173-9287-3DAB7FFA0FA4","source_` + zwsp + `url":"x.com/a b"},"2":{"id":"f0307d30ead2-41739287-3dab7ffa0fa4","source_url":"example.com/c d"}}}}`
+	want := `{"records":[{"id":"f0307d30-ead2-4173-9287-3dab7ffa0fa4","source_url":"https://x.com/a%20b"},{"id":"f0307d30-ead2-4173-9287-3dab7ffa0fa4","source_url":"https://example.com/c%20d"}]}`
+
+	assertEnsurePipeline(t, input, schema, want)
+}
+
+func TestEnsureFullPipelineRejectsInvalidUUIDWhenFormatRequiresUUID(t *testing.T) {
+	const schema = `{
+	  "type": "object",
+	  "required": ["id"],
+	  "properties": {
+	    "id": {"type": "string", "format": "uuid"}
+	  },
+	  "additionalProperties": false
+	}`
+
+	_, err := schema_compliance.Ensure("```json\n{payload:{id:'f0307d30--ead2-4173-9287-3dab7ffa0fa4'}}\n```", schema)
+	assertEnsurePipelineErrorKind(t, err, schema_compliance.ErrorKindSchemaViolation)
+}
+
 func TestEnsureFullPipelineRepairsItemItemsShapeWithURLAndScalarFixes(t *testing.T) {
 	const schema = `{
 	  "type": "object",
