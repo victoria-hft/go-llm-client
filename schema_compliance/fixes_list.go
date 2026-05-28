@@ -9,6 +9,7 @@ func oneTimeFixes() []fixFunc {
 func jsonSyntaxFixes() []fixFunc {
 	return []fixFunc{
 		repairRelaxedJSON,
+		repairTruncatedJSON,
 	}
 }
 

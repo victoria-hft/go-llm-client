@@ -63,6 +63,11 @@ func TestEnsureDoesNotRepairTruncatedJSONMissingValue(t *testing.T) {
 	assertInvalidJSONError(t, err)
 }
 
+func TestEnsureDoesNotRepairTruncatedJSONMissingColon(t *testing.T) {
+	_, err := schema_compliance.Ensure(`{"name"`, basicObjectSchema)
+	assertInvalidJSONError(t, err)
+}
+
 func TestEnsureDoesNotRepairTruncatedJSONAfterComma(t *testing.T) {
 	_, err := schema_compliance.Ensure(`{"name":"Ada",`, basicObjectSchema)
 	assertInvalidJSONError(t, err)
